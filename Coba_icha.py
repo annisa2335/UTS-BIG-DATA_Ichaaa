@@ -15,8 +15,8 @@ def debug_env():
 def locate_vehicle_model(filename="Annisa Humaira_Laporan 4.pt"):
     # lokasi yang lazim di repo
     candidates = [
-        f"model/{filename}",
-        f"models/{filename}",
+        f"model/Annisa Humaira_Laporan 2.h5",
+        f"models/Annisa Humaira_Laporan 4.pt",
         filename,                     # di root
     ]
     for p in candidates:
