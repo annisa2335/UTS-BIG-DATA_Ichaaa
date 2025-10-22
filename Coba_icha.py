@@ -1,105 +1,73 @@
+# streamlit_app.py
 import streamlit as st
-import numpy as np
-import base64
-from pathlib import Path
-from PIL import Image
-import tensorflow as tf
+from streamlit_option_menu import option_menu
 from ultralytics import YOLO
+import tensorflow as tf
+from tensorflow.keras.preprocessing import image
+import numpy as np
+from PIL import Image
 import cv2
+from pathlib import Path
 
-# ============================
-# KONFIGURASI
-# ============================
-st.set_page_config(page_title="Vision Dashboard: Classification & Detection", layout="wide")
+# =========================================
+# KONFIGURASI APLIKASI
+# =========================================
+st.set_page_config(page_title="Vision Dashboard — Icha", layout="wide")
 
-# --- path & konstanta model ---
-CLASSIFIER_PATH = "model/Annisa Humaira_Laporan 2.h5"   # Binary classifier: Car vs Truck
-DETECTOR_PATH   = "model/Annisa Humaira_Laporan 4.pt"   # YOLO detector
-IMG_SIZE = (128, 128)                                     # ukuran input classifier
-CLASS_NAMES = ["Truck", "Car"]                           # Disesuaikan dengan logika output
-# Catatan: model .h5 milikmu menghasilkan probabilitas "Car" tunggal (sigmoid)
-# sehingga kita akan memetakan >= 0.5 => Car, < 0.5 => Truck
+# ==== PATH MODEL (GANTI JIKA PERLU) ====
+# Pakai relative path seperti ini agar mudah dipindah
+YOLO_PATH = "model/Annisa Humaira_Laporan 4.pt"
+H5_PATH   = "model/Annisa Humaira_Laporan 2.h5"   # classifier Car vs Truck (sigmoid)
 
-# ============================
-# UTIL: Background Opsional
-# ============================
-def _get_base64_image(image_path: str) -> str:
-    p = Path(image_path)
-    if not p.exists():
-        return ""
-    with open(p, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
+# Ukuran input classifier (menurut kode awalmu)
+IMG_SIZE = (128, 128)
 
-bg_img = _get_base64_image("bg.jpg")
-if bg_img:
-    st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            background-image: url("data:image/jpeg;base64,{bg_img}");
-            background-size: cover;
-            background-position: center;
-            background-repeat: no-repeat;
-        }}
-        .title {{
-            text-align: center;
-            font-size: 44px;
-            font-weight: 800;
-            color: #f0f0f0;
-            text-shadow: 0 2px 6px rgba(0,0,0,.35);
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+# =========================================
+# FUNGSI UTIL
+# =========================================
+def _file_exists(p: str) -> bool:
+    return Path(p).exists()
 
-st.markdown('<div class="title">Image Classification & Object Detection</div>', unsafe_allow_html=True)
-
-# ============================
-# LOAD MODELS (cached)
-# ============================
 @st.cache_resource(show_spinner=False)
 def load_models():
-    """Load YOLO detector & TF classifier. Dibungkus try/except agar lebih aman."""
+    """Load YOLO & Keras classifier (cached)."""
     yolo_model = None
     classifier = None
 
-    # Load YOLO
+    # YOLO
     try:
-        yolo_model = YOLO(DETECTOR_PATH)
+        if not _file_exists(YOLO_PATH):
+            raise FileNotFoundError(f"File YOLO tidak ditemukan: {YOLO_PATH}")
+        yolo_model = YOLO(YOLO_PATH)
     except Exception as e:
-        st.error(f"Gagal memuat YOLO model: {e}")
+        st.error(f"❌ Gagal memuat YOLO: {e}")
 
-    # Load Classifier
+    # Classifier
     try:
-        classifier = tf.keras.models.load_model(CLASSIFIER_PATH)
+        if not _file_exists(H5_PATH):
+            raise FileNotFoundError(f"File classifier (.h5) tidak ditemukan: {H5_PATH}")
+        classifier = tf.keras.models.load_model(H5_PATH)
     except Exception as e:
-        st.error(f"Gagal memuat classifier (.h5): {e}")
+        st.error(f"❌ Gagal memuat classifier: {e}")
 
     return yolo_model, classifier
 
-
 yolo_model, classifier = load_models()
 
-# ============================
-# PREPROCESS & PREDICT (Classifier)
-# ============================
-def preprocess_image(img: Image.Image) -> np.ndarray:
-    """Resize -> RGB -> scale 0..1 -> add batch dim."""
+def preprocess_img_for_classifier(img: Image.Image) -> np.ndarray:
+    """RGB -> resize -> scale 0..1 -> add batch dim."""
     img = img.convert("RGB").resize(IMG_SIZE)
-    x = np.asarray(img).astype("float32") / 255.0
-    return np.expand_dims(x, 0)
-
+    x = image.img_to_array(img)  # float32
+    x = x / 255.0
+    return np.expand_dims(x, axis=0)
 
 def predict_car_truck(img: Image.Image):
-    """Kembalikan (label, confidence, raw_car_prob)."""
+    """Kembalikan (label, confidence, raw_car_prob). Model output diasumsikan sigmoid p(Car)."""
     if classifier is None:
         raise RuntimeError("Classifier belum termuat.")
-
-    x = preprocess_image(img)
-    preds = classifier.predict(x, verbose=0)
-    # asumsi output sigmoid [p_car]
-    p_car = float(np.ravel(preds)[0])
+    X = preprocess_img_for_classifier(img)
+    preds = classifier.predict(X, verbose=0)
+    p_car = float(np.ravel(preds)[0])  # sigmoid
     if p_car >= 0.5:
         label = "Car"
         conf = p_car
@@ -108,122 +76,141 @@ def predict_car_truck(img: Image.Image):
         conf = 1.0 - p_car
     return label, conf, p_car
 
+def yolo_detect(pil_img: Image.Image):
+    """Jalankan deteksi YOLO pada PIL image dan kembalikan (img_berbox_RGB, rows_table)."""
+    if yolo_model is None:
+        raise RuntimeError("YOLO belum termuat.")
+    results = yolo_model(pil_img)
+    r = results[0]
 
-# ============================
-# SIDEBAR & UPLOADER
-# ============================
-mode = st.sidebar.selectbox(
-    "Pilih Mode:",
-    [
-        "Deteksi Objek (YOLO)",
-        "Klasifikasi Gambar (Car vs Truck)",
-    ],
-)
+    # Gambar hasil deteksi
+    plotted = r.plot()                          # BGR (numpy)
+    plotted_rgb = cv2.cvtColor(plotted, cv2.COLOR_BGR2RGB)
 
-uploaded_file = st.file_uploader("Unggah gambar (jpg / jpeg / png)", type=["jpg", "jpeg", "png"])
+    # Tabel ringkas
+    rows = []
+    boxes = r.boxes
+    names = r.names if hasattr(r, "names") else {}
+    if boxes is not None and boxes.data is not None and len(boxes) > 0:
+        xyxy = boxes.xyxy.cpu().numpy()
+        confs = boxes.conf.cpu().numpy()
+        clss  = boxes.cls.cpu().numpy().astype(int)
+        for i in range(len(confs)):
+            label = names.get(clss[i], str(clss[i])) if isinstance(names, dict) else str(clss[i])
+            rows.append({
+                "label": label,
+                "conf": float(confs[i]),
+                "x1": float(xyxy[i][0]),
+                "y1": float(xyxy[i][1]),
+                "x2": float(xyxy[i][2]),
+                "y2": float(xyxy[i][3]),
+            })
+    return plotted_rgb, rows
 
-# Tombol reset sederhana
-if st.sidebar.button("🔄 Reset"):
-    st.session_state.pop("prediction", None)
-    st.rerun()
+# =========================================
+# SIDEBAR — MENU
+# =========================================
+with st.sidebar:
+    selected = option_menu(
+        menu_title="Navigation",
+        options=["Home", "Classification", "Detection"],
+        icons=["house", "car-front", "bounding-box"],
+        menu_icon="ui-checks-grid",
+        default_index=0,
+    )
 
-# ============================
-# KONTEN UTAMA
-# ============================
-if uploaded_file is not None:
-    img = Image.open(uploaded_file)
+# =========================================
+# HALAMAN: HOME
+# =========================================
+if selected == "Home":
+    st.image(
+        "https://tse2.mm.bing.net/th/id/OIP.kA2kMOzGD95g9evKDh5JsgAAAA?cb=12&rs=1&pid=ImgDetMain&o=7&rm=3",
+        width=150,
+    )
+    st.title("Universitas Syiah Kuala")
+    st.subheader("Praktikum Big Data — Vision Dashboard")
 
-    col1, col2 = st.columns([1.1, 1.3], gap="large")
+    st.write("**Nama:** Annisa Humaira (Icha)")
+    st.write("**Topik:** Image Classification (Car vs Truck) & Object Detection (YOLO)")
 
-    with col1:
-        st.subheader("Gambar Diupload")
-        st.image(img, use_container_width=True)
+    st.markdown("""
+    Selamat datang 👋  
+    - 🚗 **Car vs Truck Classifier** (model `.h5`)  
+    - 📦 **Object Detection** (YOLO `.pt`)  
+    """)
 
-        # Aksi khusus per mode
-        if mode == "Klasifikasi Gambar (Car vs Truck)":
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🚀 Jalankan Klasifikasi", use_container_width=True):
-                with st.spinner("Mengklasifikasi..."):
-                    try:
-                        label, conf, p_car = predict_car_truck(img)
-                        st.session_state["prediction"] = {
-                            "label": label,
-                            "conf": conf,
-                            "raw_car": p_car,
-                        }
-                    except Exception as e:
-                        st.error(f"Klasifikasi gagal: {e}")
+    st.markdown("""
+    ---
+    ### 🧭 Cara Menggunakan:
+    1. Pilih menu di **sidebar**:
+       - **Classification** → klasifikasi Car/Truck.
+       - **Detection** → deteksi objek & tampilkan bounding box.
+    2. **Unggah gambar** (JPG/PNG).
+    3. Klik tombol untuk menjalankan model.
+    4. Lihat hasil & confidence.
+    ---
+    """)
 
-        else:  # Deteksi Objek (YOLO)
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🧭 Jalankan Deteksi (YOLO)", use_container_width=True):
-                if yolo_model is None:
-                    st.error("Model YOLO belum termuat.")
-                else:
-                    with st.spinner("Mendeteksi objek..."):
-                        try:
-                            results = yolo_model(img)  # langsung dari PIL Image
-                            r = results[0]
+    st.info("💡 Tips: Gambar jelas & tajam membantu model memberi hasil lebih akurat.")
 
-                            # Gambar hasil deteksi (BGR -> RGB)
-                            plotted = r.plot()
-                            plotted_rgb = cv2.cvtColor(plotted, cv2.COLOR_BGR2RGB)
-                            st.session_state["yolo_image"] = plotted_rgb
+# =========================================
+# HALAMAN: CLASSIFICATION
+# =========================================
+elif selected == "Classification":
+    st.markdown("<h2 style='text-align:center;'>🚗 Car vs Truck Classifier</h2>", unsafe_allow_html=True)
+    uploaded = st.file_uploader("Unggah gambar kendaraan", type=["jpg", "jpeg", "png"])
+    if uploaded:
+        img = Image.open(uploaded)
+        st.image(img, caption="Gambar diunggah", use_column_width=True)
+        st.write("🔍 Mengklasifikasi...")
 
-                            # Tabel ringkasan deteksi
-                            boxes = r.boxes
-                            if boxes is not None and boxes.data is not None and len(boxes) > 0:
-                                xyxy = boxes.xyxy.cpu().numpy()
-                                confs = boxes.conf.cpu().numpy()
-                                clss = boxes.cls.cpu().numpy().astype(int)
-                                names = r.names if hasattr(r, "names") else {}
-                                rows = []
-                                for i in range(len(confs)):
-                                    label = names.get(clss[i], str(clss[i])) if isinstance(names, dict) else str(clss[i])
-                                    rows.append({
-                                        "label": label,
-                                        "conf": float(confs[i]),
-                                        "x1": float(xyxy[i][0]),
-                                        "y1": float(xyxy[i][1]),
-                                        "x2": float(xyxy[i][2]),
-                                        "y2": float(xyxy[i][3]),
-                                    })
-                                st.session_state["yolo_table"] = rows
-                            else:
-                                st.session_state["yolo_table"] = []
-                        except Exception as e:
-                            st.error(f"Deteksi gagal: {e}")
+        try:
+            label, conf, p_car = predict_car_truck(img)
+            # progress bar (0-100)
+            st.progress(int(conf * 100))
+            st.write(f"**Prediksi:** {label}")
+            st.write(f"**Confidence:** {conf:.2%}")
+            st.caption(f"(Raw probability Car = {p_car:.4f})")
 
-    with col2:
-        if mode == "Klasifikasi Gambar (Car vs Truck)":
-            st.subheader("Hasil Klasifikasi")
-            pred = st.session_state.get("prediction")
-            if pred:
-                st.markdown(
-                    f"""
-                    <h3>Prediction: <code>{pred['label']}</code></h3>
-                    <h4>Confidence: <code>{pred['conf']:.2f}</code></h4>
-                    <p style="font-size:14px;color:gray;">(Raw probability Car = {pred['raw_car']:.2f})</p>
-                    """,
-                    unsafe_allow_html=True,
-                )
+            # kartu hasil sederhana
+            if label == "Car":
+                st.markdown("""
+                    <div style='background-color:#e9f7ef; padding:16px; border-radius:12px;'>
+                    🚘 <b>Car terdeteksi</b> — akses jalur hijau.
+                    </div>
+                """, unsafe_allow_html=True)
             else:
-                st.info("Klik tombol \"Jalankan Klasifikasi\" di kolom kiri untuk melihat hasil.")
+                st.markdown("""
+                    <div style='background-color:#fef5e7; padding:16px; border-radius:12px;'>
+                    🚚 <b>Truck terdeteksi</b> — arahkan ke jalur logistik.
+                    </div>
+                """, unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"❌ Klasifikasi gagal: {e}")
 
-        else:  # Deteksi Objek (YOLO)
-            st.subheader("Hasil Deteksi YOLO")
-            yimg = st.session_state.get("yolo_image")
-            if yimg is not None:
-                st.image(yimg, use_container_width=True, caption="Deteksi dengan bounding box")
+    if st.button("Kembali ke Beranda"):
+        st.rerun()
+
+# =========================================
+# HALAMAN: DETECTION
+# =========================================
+elif selected == "Detection":
+    st.markdown("<h2 style='text-align:center;'>📦 Object Detection (YOLO)</h2>", unsafe_allow_html=True)
+    uploaded_det = st.file_uploader("Unggah gambar untuk deteksi objek", type=["jpg", "jpeg", "png"])
+    if uploaded_det:
+        img_det = Image.open(uploaded_det)
+        st.image(img_det, caption="Gambar diunggah", use_column_width=True)
+        st.write("🔎 Mendeteksi...")
+
+        try:
+            det_image, det_rows = yolo_detect(img_det)
+            st.image(det_image, use_column_width=True, caption="Hasil Deteksi (dengan bounding box)")
+            if det_rows:
+                st.dataframe(det_rows, use_container_width=True)
             else:
-                st.info("Klik tombol \"Jalankan Deteksi (YOLO)\" di kolom kiri untuk melihat hasil.")
+                st.warning("⚠️ Tidak ada objek yang terdeteksi.")
+        except Exception as e:
+            st.error(f"❌ Deteksi gagal: {e}")
 
-            ytable = st.session_state.get("yolo_table")
-            if ytable is not None:
-                if len(ytable) == 0:
-                    st.warning("Tidak ada objek yang terdeteksi.")
-                else:
-                    st.dataframe(ytable, use_container_width=True)
-
-else:
-    st.info("Silakan unggah gambar terlebih dahulu untuk mulai menggunakan dashboard.")
+    if st.button("Kembali ke Beranda"):
+        st.rerun()
