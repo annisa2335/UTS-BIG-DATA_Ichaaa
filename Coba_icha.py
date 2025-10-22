@@ -1,146 +1,96 @@
-import os
-import numpy as np
 import streamlit as st
 from PIL import Image
+import numpy as np
+import torch
+import torch.nn as nn
+from torchvision import models, transforms
 
-# Keras (wajah)
-import tensorflow as tf
-from tensorflow.keras.preprocessing import image
+# ====== CONFIG ======
+MODEL_PATH = "model/annisa_laporan4.pt"  # ganti sesuai nama file kamu
+CLASS_NAMES = ["real faces", "sketch faces", "synthetic faces"]
+IMG_SIZE = 224
+DEVICE = torch.device("cpu")
 
-# YOLOv8 classification (kendaraan)
-from ultralytics import YOLO
+st.set_page_config(page_title="Face Type Classifier (3-class)", layout="centered")
+st.title("Face Type Classifier — Real / Sketch / Synthetic")
+st.caption("Model: PyTorch .pt — mencoba load TorchScript dulu, jika gagal load state_dict ke ResNet18 (3 kelas).")
 
-# ==========================
-# Konfigurasi & utilitas
-# ==========================
-FACE_MODEL_PATH = "/mnt/data/Annisa Humaira_Laporan 2.h5"
-VEHICLE_MODEL_PATH = "/mnt/data/Annisa Humaira_Laporan 4.pt"
-FACE_INPUT_SIZE = (224, 224)  # sesuaikan dgn arsitektur wajahmu
+# ====== Transforms (asumsi standar ImageNet; ubah jika kamu pakai transform lain saat training) ======
+preprocess = transforms.Compose([
+    transforms.Resize(256),
+    transforms.CenterCrop(IMG_SIZE),
+    transforms.ToTensor(),  # [0,1], CHW
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225]),
+])
 
-# Mapping label (ubah sesuai urutan output model kamu)
-FACE_CLASS_NAMES = ["Real Faces", "Sketch Faces", "Synthetic Faces"]  # contoh
-# Untuk kendaraan, YOLO akan punya model.names; jika None, pakai fallback:
-VEHICLE_FALLBACK_NAMES = ["car", "motorcycle", "bus", "truck", "bicycle"]  # contoh
-
-def assert_exists(path: str, label: str):
-    if not os.path.exists(path):
-        st.error(f"File model {label} tidak ditemukan di: {path}")
-        st.stop()
-
-def topk_from_vector(vec, names, k=5):
-    idxs = np.argsort(-vec)[:k]
-    rows = []
-    for i in idxs:
-        name = names[i] if (names is not None and i < len(names)) else f"class_{i}"
-        rows.append((int(i), name, float(vec[i])))
-    return rows
-
-# ==========================
-# Cache load model
-# ==========================
+# ====== Loader model yang robust ======
 @st.cache_resource
-def load_face_model():
-    assert_exists(FACE_MODEL_PATH, "wajah (.h5)")
-    # Tambahkan custom_objects jika modelmu punya layer/metric kustom
-    model = tf.keras.models.load_model(FACE_MODEL_PATH)
-    return model
+def load_model():
+    # 1) Coba sebagai TorchScript
+    try:
+        scripted = torch.jit.load(MODEL_PATH, map_location=DEVICE)
+        scripted.eval()
+        return scripted, "torchscript"
+    except Exception as e_script:
+        pass  # lanjut coba state_dict
 
-@st.cache_resource
-def load_vehicle_model():
-    assert_exists(VEHICLE_MODEL_PATH, "kendaraan (.pt)")
-    model = YOLO(VEHICLE_MODEL_PATH)  # diasumsikan YOLOv8 classification
-    # Jika ini deteksi, results[0].probs kemungkinan None → ditangani saat inferensi
-    return model
+    # 2) Coba sebagai state_dict ke ResNet18 3 kelas
+    try:
+        base = models.resnet18(weights=None)          # tanpa pretrained head
+        in_features = base.fc.in_features
+        base.fc = nn.Linear(in_features, len(CLASS_NAMES))
+        state = torch.load(MODEL_PATH, map_location=DEVICE)
 
-# ==========================
-# UI
-# ==========================
-st.title("🧠 Image Classification App — Wajah & Kendaraan")
+        # state bisa wrap di 'state_dict' (mis. saat save from Lightning)
+        if isinstance(state, dict) and "state_dict" in state:
+            state = {k.replace("model.", "").replace("module.", ""): v
+                     for k, v in state["state_dict"].items()}
 
-mode = st.sidebar.selectbox(
-    "Pilih Mode Klasifikasi:",
-    ["Klasifikasi Wajah (Keras .h5)", "Klasifikasi Kendaraan (YOLOv8 .pt)"]
-)
+        # hapus prefix 'module.' kalau disave dari DataParallel
+        if isinstance(state, dict):
+            state = {k.replace("module.", ""): v for k, v in state.items()}
 
-uploaded_file = st.file_uploader("Unggah Gambar", type=["jpg", "jpeg", "png"])
-
-if uploaded_file is not None:
-    # Paksa RGB 3 kanal agar aman untuk kedua model
-    img = Image.open(uploaded_file).convert("RGB")
-    st.image(img, caption="Gambar yang Diupload", use_container_width=True)
-
-    if mode == "Klasifikasi Wajah (Keras .h5)":
-        face_model = load_face_model()
-
-        # Preprocess
-        img_resized = img.resize(FACE_INPUT_SIZE)
-        x = image.img_to_array(img_resized)        # (H, W, 3)
-        x = np.expand_dims(x, axis=0)              # (1, H, W, 3)
-        x = x / 255.0
-
-        # Predict
-        preds = face_model.predict(x)
-        if preds.ndim == 2 and preds.shape[0] == 1:
-            probs = preds[0]
-        else:
-            # Antisipasi output yang aneh (mis. sigmoid 1-unit, dll.)
-            probs = np.ravel(preds)
-        top_idx = int(np.argmax(probs))
-        top_prob = float(np.max(probs))
-        top_label = (
-            FACE_CLASS_NAMES[top_idx]
-            if 0 <= top_idx < len(FACE_CLASS_NAMES)
-            else f"Class {top_idx}"
+        base.load_state_dict(state, strict=False)     # strict=False biar toleran
+        base.eval()
+        return base, "resnet18-state_dict"
+    except Exception as e_sd:
+        raise RuntimeError(
+            f"Gagal memuat model.\n\nTorchScript error: {repr(e_script)}\nState_dict error: {repr(e_sd)}\n"
+            "Pastikan path benar dan arsitektur saat training sesuai."
         )
 
-        st.subheader("Hasil Prediksi (Top-1)")
-        st.write(f"**Label:** {top_label}")
-        st.write(f"**Probabilitas:** {top_prob:.4f}")
+model, load_mode = load_model()
+st.info(f"Model loaded as **{load_mode}** from `{MODEL_PATH}` (device: {DEVICE}).")
 
-        # Tampilkan Top-5 (jika kelas > 1)
-        if probs.size > 1:
-            st.markdown("**Top-5 Probabilities**")
-            rows = topk_from_vector(probs, FACE_CLASS_NAMES, k=min(5, probs.size))
-            st.table({"Index": [r[0] for r in rows],
-                      "Label": [r[1] for r in rows],
-                      "Prob": [f"{r[2]:.4f}" for r in rows]})
+# ====== Inferensi ======
+@torch.no_grad()
+def predict(pil_img, topk=3):
+    x = preprocess(pil_img.convert("RGB")).unsqueeze(0)  # 1xCxHxW
+    logits = model(x.to(DEVICE))
+    if isinstance(logits, (list, tuple)):   # kalau model mengeluarkan beberapa output
+        logits = logits[0]
+    probs = torch.softmax(logits, dim=1).cpu().numpy().squeeze()  # 3, float
+    idx_sorted = np.argsort(probs)[::-1][:topk]
+    return [(CLASS_NAMES[i], float(probs[i])) for i in idx_sorted], probs
 
-    elif mode == "Klasifikasi Kendaraan (YOLOv8 .pt)":
-        vehicle_model = load_vehicle_model()
+# ====== UI ======
+uploaded = st.file_uploader("Upload gambar wajah (jpg/png):", type=["jpg", "jpeg", "png"])
+thresh = st.slider("Confidence minimum untuk highlight kelas teratas", 0.0, 0.99, 0.50, 0.01)
 
-        # YOLOv8 cls bisa langsung terima array/Path. Kita pakai ndarray
-        img_np = np.array(img)  # RGB
-        results = vehicle_model(img_np, verbose=False)
-        if not results:
-            st.error("Tidak ada output dari model. Periksa file model kendaraan.")
-            st.stop()
+if uploaded is not None:
+    img = Image.open(uploaded).convert("RGB")
+    st.image(img, caption="Preview", use_container_width=True)
 
-        r0 = results[0]
-        # Jika ini BUKAN model klasifikasi (mis. deteksi), probs akan None
-        if getattr(r0, "probs", None) is None:
-            st.error(
-                "Model .pt yang dimuat tampaknya bukan model klasifikasi (YOLOv8-cls). "
-                "Gunakan file YOLOv8-classification (.pt) agar fitur probabilitas tersedia."
-            )
-            st.stop()
+    topk, probs = predict(img, topk=3)
 
-        probs_vec = r0.probs.data.cpu().numpy() if hasattr(r0.probs, "data") else np.asarray(r0.probs)
-        names = getattr(vehicle_model, "names", None)
-        if not names:
-            names = VEHICLE_FALLBACK_NAMES  # fallback contoh
+    st.subheader("Probabilitas Kelas")
+    for name, p in topk:
+        st.write(f"**{name}**: {p:.3f}")
+        st.progress(min(max(p, 0.0), 1.0))
 
-        top_idx = int(np.argmax(probs_vec))
-        top_prob = float(np.max(probs_vec))
-        top_label = names[top_idx] if top_idx < len(names) else f"class_{top_idx}"
-
-        st.subheader("Hasil Prediksi (Top-1)")
-        st.write(f"**Label:** {top_label}")
-        st.write(f"**Probabilitas:** {top_prob:.4f}")
-
-        # Top-5
-        if probs_vec.size > 1:
-            st.markdown("**Top-5 Probabilities**")
-            rows = topk_from_vector(probs_vec, names, k=min(5, probs_vec.size))
-            st.table({"Index": [r[0] for r in rows],
-                      "Label": [r[1] for r in rows],
-                      "Prob": [f"{r[2]:.4f}" for r in rows]})
+    pred_label, pred_conf = topk[0]
+    if pred_conf >= thresh:
+        st.success(f"Prediksi: **{pred_label}** (conf {pred_conf:.2f})")
+    else:
+        st.warning(f"Keyakinan model rendah ({pred_conf:.2f}). Coba gambar lain atau turunkan threshold.")
