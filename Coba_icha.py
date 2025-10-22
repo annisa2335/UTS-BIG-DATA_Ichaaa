@@ -15,15 +15,14 @@ from pathlib import Path
 st.set_page_config(page_title="Vision Dashboard — Icha", layout="wide")
 
 # ==== PATH MODEL (GANTI JIKA PERLU) ====
-# Pakai relative path seperti ini agar mudah dipindah
-YOLO_PATH = "model/Annisa Humaira_Laporan 4.pt"
-H5_PATH   = "model/Annisa Humaira_Laporan 2.h5"   # classifier Car vs Truck (sigmoid)
+YOLO_PATH = "model/Annisa Humaira_Laporan 4.pt"     # YOLO detector
+H5_PATH   = "model/Annisa Humaira_Laporan 2.h5"     # Classifier Car vs Truck (sigmoid 1-neuron)
 
-# Ukuran input classifier (menurut kode awalmu)
+# Ukuran input classifier (kode awalmu)
 IMG_SIZE = (128, 128)
 
 # =========================================
-# FUNGSI UTIL
+# UTIL
 # =========================================
 def _file_exists(p: str) -> bool:
     return Path(p).exists()
@@ -62,7 +61,7 @@ def preprocess_img_for_classifier(img: Image.Image) -> np.ndarray:
     return np.expand_dims(x, axis=0)
 
 def predict_car_truck(img: Image.Image):
-    """Kembalikan (label, confidence, raw_car_prob). Model output diasumsikan sigmoid p(Car)."""
+    """Return (label, confidence, raw_car_prob). Output diasumsikan sigmoid p(Car)."""
     if classifier is None:
         raise RuntimeError("Classifier belum termuat.")
     X = preprocess_img_for_classifier(img)
@@ -118,6 +117,11 @@ with st.sidebar:
         menu_icon="ui-checks-grid",
         default_index=0,
     )
+    st.markdown("---")
+    if st.button("🔄 Reset"):
+        for k in ["pred", "det_image", "det_rows"]:
+            st.session_state.pop(k, None)
+        st.rerun()
 
 # =========================================
 # HALAMAN: HOME
@@ -150,7 +154,6 @@ if selected == "Home":
     4. Lihat hasil & confidence.
     ---
     """)
-
     st.info("💡 Tips: Gambar jelas & tajam membantu model memberi hasil lebih akurat.")
 
 # =========================================
@@ -162,34 +165,44 @@ elif selected == "Classification":
     if uploaded:
         img = Image.open(uploaded)
         st.image(img, caption="Gambar diunggah", use_column_width=True)
-        st.write("🔍 Mengklasifikasi...")
 
-        try:
-            label, conf, p_car = predict_car_truck(img)
-            # progress bar (0-100)
-            st.progress(int(conf * 100))
-            st.write(f"**Prediksi:** {label}")
-            st.write(f"**Confidence:** {conf:.2%}")
-            st.caption(f"(Raw probability Car = {p_car:.4f})")
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            run_cls = st.button("🚀 Jalankan Klasifikasi", use_container_width=True)
+        with col2:
+            back_btn = st.button("⬅️ Kembali ke Beranda", use_container_width=True)
 
-            # kartu hasil sederhana
-            if label == "Car":
-                st.markdown("""
-                    <div style='background-color:#e9f7ef; padding:16px; border-radius:12px;'>
-                    🚘 <b>Car terdeteksi</b> — akses jalur hijau.
-                    </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown("""
-                    <div style='background-color:#fef5e7; padding:16px; border-radius:12px;'>
-                    🚚 <b>Truck terdeteksi</b> — arahkan ke jalur logistik.
-                    </div>
-                """, unsafe_allow_html=True)
-        except Exception as e:
-            st.error(f"❌ Klasifikasi gagal: {e}")
+        if back_btn:
+            st.experimental_rerun()
 
-    if st.button("Kembali ke Beranda"):
-        st.rerun()
+        if run_cls:
+            st.write("🔍 Mengklasifikasi...")
+            try:
+                label, conf, p_car = predict_car_truck(img)
+                st.session_state["pred"] = {"label": label, "conf": conf, "p_car": p_car}
+            except Exception as e:
+                st.error(f"❌ Klasifikasi gagal: {e}")
+
+    # Panel hasil
+    pred = st.session_state.get("pred")
+    if pred:
+        st.progress(int(pred["conf"] * 100))
+        st.write(f"**Prediksi:** {pred['label']}")
+        st.write(f"**Confidence:** {pred['conf']:.2%}")
+        st.caption(f"(Raw probability Car = {pred['p_car']:.4f})")
+
+        if pred["label"] == "Car":
+            st.markdown("""
+                <div style='background-color:#e9f7ef; padding:16px; border-radius:12px;'>
+                🚘 <b>Car terdeteksi</b> — akses jalur hijau.
+                </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+                <div style='background-color:#fef5e7; padding:16px; border-radius:12px;'>
+                🚚 <b>Truck terdeteksi</b> — arahkan ke jalur logistik.
+                </div>
+            """, unsafe_allow_html=True)
 
 # =========================================
 # HALAMAN: DETECTION
@@ -200,17 +213,31 @@ elif selected == "Detection":
     if uploaded_det:
         img_det = Image.open(uploaded_det)
         st.image(img_det, caption="Gambar diunggah", use_column_width=True)
-        st.write("🔎 Mendeteksi...")
 
-        try:
-            det_image, det_rows = yolo_detect(img_det)
-            st.image(det_image, use_column_width=True, caption="Hasil Deteksi (dengan bounding box)")
-            if det_rows:
-                st.dataframe(det_rows, use_container_width=True)
-            else:
-                st.warning("⚠️ Tidak ada objek yang terdeteksi.")
-        except Exception as e:
-            st.error(f"❌ Deteksi gagal: {e}")
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            run_det = st.button("🧭 Jalankan Deteksi (YOLO)", use_container_width=True)
+        with col2:
+            back_btn = st.button("⬅️ Kembali ke Beranda", use_container_width=True)
 
-    if st.button("Kembali ke Beranda"):
-        st.rerun()
+        if back_btn:
+            st.experimental_rerun()
+
+        if run_det:
+            st.write("🔎 Mendeteksi...")
+            try:
+                det_image, det_rows = yolo_detect(img_det)
+                st.session_state["det_image"] = det_image
+                st.session_state["det_rows"] = det_rows
+            except Exception as e:
+                st.error(f"❌ Deteksi gagal: {e}")
+
+    # Panel hasil
+    if st.session_state.get("det_image") is not None:
+        st.image(st.session_state["det_image"], use_container_width=True, caption="Hasil Deteksi (with bounding box)")
+    det_rows = st.session_state.get("det_rows")
+    if det_rows is not None:
+        if len(det_rows) == 0:
+            st.warning("⚠️ Tidak ada objek yang terdeteksi.")
+        else:
+            st.dataframe(det_rows, use_container_width=True)
