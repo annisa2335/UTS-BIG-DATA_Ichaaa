@@ -1,187 +1,229 @@
-# Coba_icha.py
 import streamlit as st
-from PIL import Image
 import numpy as np
-import torch
-import torch.nn as nn
-from torchvision import models, transforms
+import base64
 from pathlib import Path
+from PIL import Image
+import tensorflow as tf
+from ultralytics import YOLO
+import cv2
 
-# =========================
-# KONFIGURASI & KONSTANTA
-# =========================
-CLASS_NAMES = ["real faces", "sketch faces", "synthetic faces"]
-DEVICE = torch.device("cpu")
-IMG_SIZE = 224
+# ============================
+# KONFIGURASI
+# ============================
+st.set_page_config(page_title="Vision Dashboard: Classification & Detection", layout="wide")
 
-st.set_page_config(page_title="Face Type Classifier (3-class)", layout="centered")
-st.title("🧠 Face Type Classifier — Real / Sketch / Synthetic")
-st.caption("Memuat model .pt (TorchScript atau state_dict) dan memprediksi 3 kelas wajah.")
+# --- path & konstanta model ---
+CLASSIFIER_PATH = "model/Annisa Humaira_Laporan 2.h5"   # Binary classifier: Car vs Truck
+DETECTOR_PATH   = "model/Annisa Humaira_Laporan 4.pt"   # YOLO detector
+IMG_SIZE = (128, 128)                                     # ukuran input classifier
+CLASS_NAMES = ["Truck", "Car"]                           # Disesuaikan dengan logika output
+# Catatan: model .h5 milikmu menghasilkan probabilitas "Car" tunggal (sigmoid)
+# sehingga kita akan memetakan >= 0.5 => Car, < 0.5 => Truck
 
-# =========================
-# UTIL: cari file model .pt
-# =========================
-def auto_find_model() -> str:
-    # cari di folder 'model/' dulu, kalau tidak ada, cari di root repo
-    candidates = list(Path("model").glob("*.pt")) + list(Path(".").glob("*.pt"))
-    return str(candidates[0]) if candidates else ""
+# ============================
+# UTIL: Background Opsional
+# ============================
+def _get_base64_image(image_path: str) -> str:
+    p = Path(image_path)
+    if not p.exists():
+        return ""
+    with open(p, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
 
-# =========================
-# TRANSFORM (samakan dg training)
-# =========================
-preprocess = transforms.Compose([
-    transforms.Resize(256),
-    transforms.CenterCrop(IMG_SIZE),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225]),
-])
+bg_img = _get_base64_image("bg.jpg")
+if bg_img:
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image: url("data:image/jpeg;base64,{bg_img}");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }}
+        .title {{
+            text-align: center;
+            font-size: 44px;
+            font-weight: 800;
+            color: #f0f0f0;
+            text-shadow: 0 2px 6px rgba(0,0,0,.35);
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-# =========================
-# BUILDER ARSITEKTUR
-# =========================
-def build_model(arch_name: str, num_classes: int):
-    """
-    Bangun model kosong sesuai arsitektur pilihan, ganti head ke num_classes.
-    Tambahkan arsitektur lain jika perlu.
-    """
-    arch_name = arch_name.lower().strip()
-    if arch_name == "resnet18":
-        m = models.resnet18(weights=None)
-        m.fc = nn.Linear(m.fc.in_features, num_classes)
-        return m
-    if arch_name == "resnet34":
-        m = models.resnet34(weights=None)
-        m.fc = nn.Linear(m.fc.in_features, num_classes)
-        return m
-    if arch_name == "resnet50":
-        m = models.resnet50(weights=None)
-        m.fc = nn.Linear(m.fc.in_features, num_classes)
-        return m
-    if arch_name == "mobilenet_v3_small":
-        m = models.mobilenet_v3_small(weights=None)
-        in_f = m.classifier[-1].in_features
-        m.classifier[-1] = nn.Linear(in_f, num_classes)
-        return m
-    if arch_name == "mobilenet_v3_large":
-        m = models.mobilenet_v3_large(weights=None)
-        in_f = m.classifier[-1].in_features
-        m.classifier[-1] = nn.Linear(in_f, num_classes)
-        return m
-    if hasattr(models, "efficientnet_b0") and arch_name == "efficientnet_b0":
-        m = models.efficientnet_b0(weights=None)
-        in_f = m.classifier[-1].in_features
-        m.classifier[-1] = nn.Linear(in_f, num_classes)
-        return m
+st.markdown('<div class="title">Image Classification & Object Detection</div>', unsafe_allow_html=True)
 
-    # fallback
-    raise ValueError(f"Arsitektur '{arch_name}' belum di-handle. Pilih salah satu dari menu.")
+# ============================
+# LOAD MODELS (cached)
+# ============================
+@st.cache_resource(show_spinner=False)
+def load_models():
+    """Load YOLO detector & TF classifier. Dibungkus try/except agar lebih aman."""
+    yolo_model = None
+    classifier = None
 
-# =========================
-# LOAD MODEL (robust + UI error)
-# =========================
-@st.cache_resource
-def load_model(model_path: str, arch_name: str):
-    """
-    1) Coba TorchScript: torch.jit.load
-    2) Jika gagal, bangun model arsitektur 'arch_name', lalu load state_dict
-    Bila tetap gagal, tampilkan error di UI & hentikan app.
-    """
-    # Validasi path
-    if not model_path or not Path(model_path).exists():
-        st.error(f"❌ File model tidak ditemukan: `{model_path}`")
-        st.stop()
-
-    # --- 1) TorchScript ---
-    ts_err = None
+    # Load YOLO
     try:
-        scripted = torch.jit.load(model_path, map_location=DEVICE)
-        scripted.eval()
-        return scripted, "torchscript"
+        yolo_model = YOLO(DETECTOR_PATH)
     except Exception as e:
-        ts_err = e  # simpan error untuk ditampilkan nanti
+        st.error(f"Gagal memuat YOLO model: {e}")
 
-    # --- 2) state_dict ke arsitektur yang dipilih ---
-    sd_err = None
+    # Load Classifier
     try:
-        base = build_model(arch_name, len(CLASS_NAMES))
-        state = torch.load(model_path, map_location=DEVICE)
-
-        # kadang tersimpan di key 'state_dict' (Lightning)
-        if isinstance(state, dict) and "state_dict" in state:
-            state = {k.replace("model.", "").replace("module.", ""): v
-                     for k, v in state["state_dict"].items()}
-
-        # hapus prefix 'module.' (DataParallel)
-        if isinstance(state, dict):
-            state = {k.replace("module.", ""): v for k, v in state.items()}
-
-        base.load_state_dict(state, strict=False)  # strict=False biar toleran bbp key
-        base.eval()
-        return base, f"{arch_name}-state_dict"
-
+        classifier = tf.keras.models.load_model(CLASSIFIER_PATH)
     except Exception as e:
-        sd_err = e
-        # Tampilkan error rinci di UI agar ketahuan masalah aslinya
-        st.error("❌ Gagal memuat model sebagai TorchScript maupun state_dict.")
-        with st.expander("Lihat detail error TorchScript"):
-            st.exception(ts_err)
-        with st.expander("Lihat detail error State_dict"):
-            st.exception(sd_err)
-        st.stop()
+        st.error(f"Gagal memuat classifier (.h5): {e}")
 
-# =========================
-# PREDIKSI
-# =========================
-@torch.no_grad()
-def predict(pil_img, model):
-    x = preprocess(pil_img.convert("RGB")).unsqueeze(0).to(DEVICE)
-    out = model(x)
-    if isinstance(out, (list, tuple)):
-        out = out[0]
-    probs = torch.softmax(out, dim=1).cpu().numpy().squeeze()
-    order = np.argsort(probs)[::-1]
-    top = [(CLASS_NAMES[i], float(probs[i])) for i in order]
-    return top, probs
+    return yolo_model, classifier
 
-# =========================
-# UI: pilih model & arsitektur
-# =========================
-st.subheader("⚙️ Pengaturan Model")
-default_path = auto_find_model()
-model_path = st.text_input("Path file model (.pt):", value=default_path, help="Contoh: model/Annisa_Humaira_Laporan_4.pt")
-arch_choice = st.selectbox(
-    "Arsitektur (gunakan arsitektur yang sama saat training jika file adalah state_dict):",
-    ["resnet18", "resnet34", "resnet50", "mobilenet_v3_small", "mobilenet_v3_large", "efficientnet_b0"],
-    index=0
+
+yolo_model, classifier = load_models()
+
+# ============================
+# PREPROCESS & PREDICT (Classifier)
+# ============================
+def preprocess_image(img: Image.Image) -> np.ndarray:
+    """Resize -> RGB -> scale 0..1 -> add batch dim."""
+    img = img.convert("RGB").resize(IMG_SIZE)
+    x = np.asarray(img).astype("float32") / 255.0
+    return np.expand_dims(x, 0)
+
+
+def predict_car_truck(img: Image.Image):
+    """Kembalikan (label, confidence, raw_car_prob)."""
+    if classifier is None:
+        raise RuntimeError("Classifier belum termuat.")
+
+    x = preprocess_image(img)
+    preds = classifier.predict(x, verbose=0)
+    # asumsi output sigmoid [p_car]
+    p_car = float(np.ravel(preds)[0])
+    if p_car >= 0.5:
+        label = "Car"
+        conf = p_car
+    else:
+        label = "Truck"
+        conf = 1.0 - p_car
+    return label, conf, p_car
+
+
+# ============================
+# SIDEBAR & UPLOADER
+# ============================
+mode = st.sidebar.selectbox(
+    "Pilih Mode:",
+    [
+        "Deteksi Objek (YOLO)",
+        "Klasifikasi Gambar (Car vs Truck)",
+    ],
 )
 
-load_btn = st.button("Muat Model")
+uploaded_file = st.file_uploader("Unggah gambar (jpg / jpeg / png)", type=["jpg", "jpeg", "png"])
 
-# Cache akan membuat model tetap tersimpan sampai app direstart / param berubah
-if load_btn or (model_path and default_path and model_path == default_path):
-    model, load_mode = load_model(model_path, arch_choice)
-    st.success(f"✅ Model dimuat sebagai **{load_mode}** dari `{model_path}`")
+# Tombol reset sederhana
+if st.sidebar.button("🔄 Reset"):
+    st.session_state.pop("prediction", None)
+    st.rerun()
 
-    st.subheader("🖼️ Prediksi Gambar")
-    uploaded = st.file_uploader("Upload gambar (jpg/png):", type=["jpg", "jpeg", "png"])
-    threshold = st.slider("Confidence minimum:", 0.0, 1.0, 0.5, 0.05)
+# ============================
+# KONTEN UTAMA
+# ============================
+if uploaded_file is not None:
+    img = Image.open(uploaded_file)
 
-    if uploaded is not None:
-        img = Image.open(uploaded).convert("RGB")
-        st.image(img, caption="Gambar diunggah", use_container_width=True)
+    col1, col2 = st.columns([1.1, 1.3], gap="large")
 
-        topk, probs = predict(img, model)
+    with col1:
+        st.subheader("Gambar Diupload")
+        st.image(img, use_container_width=True)
 
-        st.markdown("### 📊 Probabilitas Kelas")
-        for label, p in topk:
-            st.write(f"**{label}** : {p:.3f}")
-            st.progress(min(max(p, 0.0), 1.0))
+        # Aksi khusus per mode
+        if mode == "Klasifikasi Gambar (Car vs Truck)":
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🚀 Jalankan Klasifikasi", use_container_width=True):
+                with st.spinner("Mengklasifikasi..."):
+                    try:
+                        label, conf, p_car = predict_car_truck(img)
+                        st.session_state["prediction"] = {
+                            "label": label,
+                            "conf": conf,
+                            "raw_car": p_car,
+                        }
+                    except Exception as e:
+                        st.error(f"Klasifikasi gagal: {e}")
 
-        best_label, best_prob = topk[0]
-        if best_prob >= threshold:
-            st.success(f"Prediksi: **{best_label}** (confidence {best_prob:.2f})")
-        else:
-            st.warning(f"Keyakinan rendah ({best_prob:.2f}). Coba gambar lain atau turunkan threshold.")
+        else:  # Deteksi Objek (YOLO)
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🧭 Jalankan Deteksi (YOLO)", use_container_width=True):
+                if yolo_model is None:
+                    st.error("Model YOLO belum termuat.")
+                else:
+                    with st.spinner("Mendeteksi objek..."):
+                        try:
+                            results = yolo_model(img)  # langsung dari PIL Image
+                            r = results[0]
+
+                            # Gambar hasil deteksi (BGR -> RGB)
+                            plotted = r.plot()
+                            plotted_rgb = cv2.cvtColor(plotted, cv2.COLOR_BGR2RGB)
+                            st.session_state["yolo_image"] = plotted_rgb
+
+                            # Tabel ringkasan deteksi
+                            boxes = r.boxes
+                            if boxes is not None and boxes.data is not None and len(boxes) > 0:
+                                xyxy = boxes.xyxy.cpu().numpy()
+                                confs = boxes.conf.cpu().numpy()
+                                clss = boxes.cls.cpu().numpy().astype(int)
+                                names = r.names if hasattr(r, "names") else {}
+                                rows = []
+                                for i in range(len(confs)):
+                                    label = names.get(clss[i], str(clss[i])) if isinstance(names, dict) else str(clss[i])
+                                    rows.append({
+                                        "label": label,
+                                        "conf": float(confs[i]),
+                                        "x1": float(xyxy[i][0]),
+                                        "y1": float(xyxy[i][1]),
+                                        "x2": float(xyxy[i][2]),
+                                        "y2": float(xyxy[i][3]),
+                                    })
+                                st.session_state["yolo_table"] = rows
+                            else:
+                                st.session_state["yolo_table"] = []
+                        except Exception as e:
+                            st.error(f"Deteksi gagal: {e}")
+
+    with col2:
+        if mode == "Klasifikasi Gambar (Car vs Truck)":
+            st.subheader("Hasil Klasifikasi")
+            pred = st.session_state.get("prediction")
+            if pred:
+                st.markdown(
+                    f"""
+                    <h3>Prediction: <code>{pred['label']}</code></h3>
+                    <h4>Confidence: <code>{pred['conf']:.2f}</code></h4>
+                    <p style="font-size:14px;color:gray;">(Raw probability Car = {pred['raw_car']:.2f})</p>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info("Klik tombol \"Jalankan Klasifikasi\" di kolom kiri untuk melihat hasil.")
+
+        else:  # Deteksi Objek (YOLO)
+            st.subheader("Hasil Deteksi YOLO")
+            yimg = st.session_state.get("yolo_image")
+            if yimg is not None:
+                st.image(yimg, use_container_width=True, caption="Deteksi dengan bounding box")
+            else:
+                st.info("Klik tombol \"Jalankan Deteksi (YOLO)\" di kolom kiri untuk melihat hasil.")
+
+            ytable = st.session_state.get("yolo_table")
+            if ytable is not None:
+                if len(ytable) == 0:
+                    st.warning("Tidak ada objek yang terdeteksi.")
+                else:
+                    st.dataframe(ytable, use_container_width=True)
+
 else:
-    st.info("Pilih/isi path model lalu klik **Muat Model** untuk mulai.")
+    st.info("Silakan unggah gambar terlebih dahulu untuk mulai menggunakan dashboard.")
