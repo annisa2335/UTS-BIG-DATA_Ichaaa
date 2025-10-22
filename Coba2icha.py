@@ -1,3 +1,4 @@
+# Coba2icha.py
 import streamlit as st
 import numpy as np
 import base64
@@ -5,25 +6,28 @@ from pathlib import Path
 from PIL import Image
 import tensorflow as tf
 
-# -----------------------------
-# Konfigurasi halaman
+# ==============================
+# 1) Konfigurasi halaman
+# ==============================
 st.set_page_config(page_title="Car or Truck Classification", layout="wide")
 
-# -----------------------------
-# Data model (edit sesuai file kamu)
+# ==============================
+# 2) Data model (EDIT path sesuai file kamu)
+# ==============================
 DATA = {
     "Car": {
         "class_names": ["Not a Car", "A Car"],
-        "weights_path": "model/Annisa Humaira_Laporan 2.h5",   # <— ganti jika perlu
+        "weights_path": "model/Annisa Humaira_Laporan 2.h5",   # ganti jika perlu
     },
     "Truck": {
         "class_names": ["Not a Truck", "A Truck"],
-        "weights_path": "model/Annisa Humaira_Laporan 2.h5",   # <— ganti ke .h5 lain bila ada
+        "weights_path": "model/Annisa Humaira_Laporan 2.h5",   # ganti ke .h5 lain bila ada
     },
 }
 
-# -----------------------------
-# Background image (opsional)
+# ==============================
+# 3) Background (opsional)
+# ==============================
 def get_base64_image(image_path: str) -> str:
     p = Path(image_path)
     if not p.exists():
@@ -66,44 +70,98 @@ else:
 
 st.markdown('<div class="title">Car / Truck Image Classification</div>', unsafe_allow_html=True)
 
-# -----------------------------
-# Loader & prediksi
+# ==============================
+# 4) Load model & adaptasi input
+# ==============================
 @st.cache_resource(show_spinner=False)
 def load_model(weights_path: str):
-    path = Path(weights_path)
-    if not path.exists():
+    p = Path(weights_path)
+    if not p.exists():
         raise FileNotFoundError(f"Model file not found: {weights_path}")
-    # Load Keras model
-    return tf.keras.models.load_model(str(path))
+    model = tf.keras.models.load_model(str(p))
+    input_shape = model.inputs[0].shape  # misal: (None, 150, 150, 3) atau (None, 3, 224, 224)
+    return model, input_shape
 
-def preprocess_image(pil_img: Image.Image, img_size=(224, 224)) -> np.ndarray:
-    img = pil_img.resize(img_size)
+def preprocess_image_adaptive(pil_img: Image.Image, input_shape) -> np.ndarray:
+    # input_shape di Keras berbentuk tf.TensorShape; ambil dimensi 1..3
+    if len(input_shape) != 4:
+        raise ValueError(f"Model expects 4D tensor, got {input_shape}")
+
+    a = input_shape[1]  # bisa None/int
+    b = input_shape[2]
+    c = input_shape[3]
+
+    # Deteksi channels_first vs channels_last
+    # Heuristik: jika dimensi ke-1 adalah 1/3 dan dimensi terakhir bukan 1/3 -> channels_first
+    channels_first = False
+    if a in (1, 3) and (c not in (1, 3, None)):
+        channels_first = True
+
+    if channels_first:
+        C = int(a) if a is not None else 3
+        H = int(b) if b is not None else 224
+        W = int(c) if c is not None else 224
+    else:
+        H = int(a) if a is not None else 224
+        W = int(b) if b is not None else 224
+        C = int(c) if c is not None else 3
+
+    # Konversi channel sesuai model
+    if C == 1:
+        img = pil_img.convert("L")
+    else:
+        img = pil_img.convert("RGB")
+
+    # Resize sesuai HxW model
+    img = img.resize((W, H))
     arr = np.asarray(img).astype("float32") / 255.0
-    if arr.ndim == 2:  # grayscale → 3 channel
-        arr = np.stack([arr]*3, axis=-1)
-    # (H, W, C) → (1, H, W, C)
-    return np.expand_dims(arr, axis=0)
 
-def classify_image(pil_img: Image.Image, model, class_names, img_size=(224, 224)):
-    x = preprocess_image(pil_img, img_size=img_size)
+    # Pastikan shape punya channel
+    if C == 1 and arr.ndim == 2:
+        arr = np.expand_dims(arr, axis=-1)  # (H, W, 1)
+
+    # Susun ke channels_first bila perlu
+    if channels_first:
+        if arr.ndim == 2:
+            arr = np.expand_dims(arr, -1)
+        arr = np.transpose(arr, (2, 0, 1))  # (C, H, W)
+
+    # Tambahkan batch dim
+    arr = np.expand_dims(arr, axis=0)  # (1, H, W, C) atau (1, C, H, W)
+    return arr
+
+def classify_image(pil_img: Image.Image, model, input_shape, class_names):
+    x = preprocess_image_adaptive(pil_img, input_shape)
     preds = model.predict(x, verbose=0)
-    # handle output shape: (1, 1) sigmoid atau (1, 2) softmax
+
+    # Output bisa sigmoid (1 unit) atau softmax (2 unit)
     if preds.shape[-1] == 1:
-        score_pos = float(preds[0, 0])
-        idx = int(score_pos >= 0.5)
-        conf = score_pos if idx == 1 else 1.0 - score_pos
+        p = float(preds.ravel()[0])
+        idx = int(p >= 0.5)
+        conf = p if idx == 1 else 1.0 - p
     else:
         idx = int(np.argmax(preds[0]))
         conf = float(np.max(preds[0]))
-    label = class_names[idx]
-    return label, conf
 
-# -----------------------------
-# UI
+    return class_names[idx], conf
+
+# ==============================
+# 5) UI
+# ==============================
 model_name = st.selectbox("Choose a Classification Model", list(DATA.keys()))
 model_info = DATA[model_name]
 
 uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+
+# Info debug (membantu kalau shape tidak cocok)
+with st.expander("ℹ️ Model & Input Info"):
+    st.write("Selected model:", model_name)
+    st.write("Weights path:", model_info["weights_path"])
+    try:
+        _m, _shape = load_model(model_info["weights_path"])
+        st.write("Model input shape:", tuple(_shape))
+    except Exception as e:
+        st.write("Model not loaded yet / error:", str(e))
 
 if uploaded_file is not None:
     img = Image.open(uploaded_file).convert("RGB")
@@ -118,22 +176,31 @@ if uploaded_file is not None:
         run = st.button("Run Classification", use_container_width=True)
 
         if run:
-            with st.spinner("Loading model & classifying..."):
-                model = load_model(model_info["weights_path"])
-                label, score = classify_image(img, model, model_info["class_names"], img_size=(224, 224))
-            st.session_state["prediction"] = (label, score, model_info["weights_path"], model_name)
+            try:
+                with st.spinner("Loading model & classifying..."):
+                    model, input_shape = load_model(model_info["weights_path"])
+                    label, score = classify_image(img, model, input_shape, model_info["class_names"])
+                st.session_state["prediction"] = {
+                    "label": label,
+                    "score": score,
+                    "weights": model_info["weights_path"],
+                    "chosen": model_name,
+                    "input_shape": tuple(input_shape),
+                }
+            except Exception as e:
+                st.error(f"Failed to run classification: {e}")
 
     with col3:
         pred = st.session_state.get("prediction")
         if pred:
-            label, score, weights_used, chosen_model = pred
             st.markdown(
                 f"""
                 <br><br>
-                <h3>Prediction: <code>{label}</code></h3>
-                <h4>Confidence: <code>{score:.2f}</code></h4>
-                <h5>Model selected: <code>{chosen_model}</code></h5>
-                <h5>Weights path: <code>{weights_used}</code></h5>
+                <h3>Prediction: <code>{pred['label']}</code></h3>
+                <h4>Confidence: <code>{pred['score']:.2f}</code></h4>
+                <h5>Model selected: <code>{pred['chosen']}</code></h5>
+                <h5>Weights path: <code>{pred['weights']}</code></h5>
+                <h5>Input shape: <code>{pred['input_shape']}</code></h5>
                 """,
                 unsafe_allow_html=True
             )
