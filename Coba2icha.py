@@ -1,6 +1,7 @@
 import streamlit as st
 from keras.models import load_model
 from PIL import image
+from util import classify
 
 #set title
 st.title('Car Classification')
@@ -18,3 +19,6 @@ model = load_model('./model/Annisa Humaira_Laporan 2.h5')
 if file is not None:
   image = image.open(file).convert('RGB')
   st.image(image, use_columnn_wodth=True)
+
+#classify image
+classify(image, model, class_names)
