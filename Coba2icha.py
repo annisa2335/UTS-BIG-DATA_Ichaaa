@@ -7,26 +7,32 @@ from PIL import Image
 import tensorflow as tf
 
 # ==============================
-# 1) Konfigurasi halaman
+# Konfigurasi halaman
 # ==============================
 st.set_page_config(page_title="Car or Truck Classification", layout="wide")
 
 # ==============================
-# 2) Data model (EDIT path sesuai file kamu)
+# Data model
+# - weights_path: path .h5
+# - class_names: [negatif, positif]
+# - positive_label_index: index kelas positif pada output sigmoid (0 atau 1)
+#   Jika prediksi terasa kebalik, ganti 0 <-> 1.
 # ==============================
 DATA = {
     "Car": {
         "class_names": ["Not a Car", "A Car"],
-        "weights_path": "model/Annisa Humaira_Laporan 2.h5",   # ganti jika perlu
+        "weights_path": "model/Annisa Humaira_Laporan 2.h5",
+        "positive_label_index": 1,  # ubah ke 0 jika terasa kebalik
     },
     "Truck": {
         "class_names": ["Not a Truck", "A Truck"],
-        "weights_path": "model/Annisa Humaira_Laporan 2.h5",   # ganti ke .h5 lain bila ada
+        "weights_path": "model/Annisa Humaira_Laporan 2.h5",
+        "positive_label_index": 1,  # ubah ke 0 jika terasa kebalik
     },
 }
 
 # ==============================
-# 3) Background (opsional)
+# Background (opsional)
 # ==============================
 def get_base64_image(image_path: str) -> str:
     p = Path(image_path)
@@ -71,7 +77,7 @@ else:
 st.markdown('<div class="title">Car / Truck Image Classification</div>', unsafe_allow_html=True)
 
 # ==============================
-# 4) Load model & adaptasi input
+# Load model (cache)
 # ==============================
 @st.cache_resource(show_spinner=False)
 def load_model(weights_path: str):
@@ -79,92 +85,70 @@ def load_model(weights_path: str):
     if not p.exists():
         raise FileNotFoundError(f"Model file not found: {weights_path}")
     model = tf.keras.models.load_model(str(p))
-    input_shape = model.inputs[0].shape  # misal: (None, 150, 150, 3) atau (None, 3, 224, 224)
-    return model, input_shape
-
-def preprocess_image_adaptive(pil_img: Image.Image, input_shape) -> np.ndarray:
-    # input_shape di Keras berbentuk tf.TensorShape; ambil dimensi 1..3
-    if len(input_shape) != 4:
-        raise ValueError(f"Model expects 4D tensor, got {input_shape}")
-
-    a = input_shape[1]  # bisa None/int
-    b = input_shape[2]
-    c = input_shape[3]
-
-    # Deteksi channels_first vs channels_last
-    # Heuristik: jika dimensi ke-1 adalah 1/3 dan dimensi terakhir bukan 1/3 -> channels_first
-    channels_first = False
-    if a in (1, 3) and (c not in (1, 3, None)):
-        channels_first = True
-
-    if channels_first:
-        C = int(a) if a is not None else 3
-        H = int(b) if b is not None else 224
-        W = int(c) if c is not None else 224
-    else:
-        H = int(a) if a is not None else 224
-        W = int(b) if b is not None else 224
-        C = int(c) if c is not None else 3
-
-    # Konversi channel sesuai model
-    if C == 1:
-        img = pil_img.convert("L")
-    else:
-        img = pil_img.convert("RGB")
-
-    # Resize sesuai HxW model
-    img = img.resize((W, H))
-    arr = np.asarray(img).astype("float32") / 255.0
-
-    # Pastikan shape punya channel
-    if C == 1 and arr.ndim == 2:
-        arr = np.expand_dims(arr, axis=-1)  # (H, W, 1)
-
-    # Susun ke channels_first bila perlu
-    if channels_first:
-        if arr.ndim == 2:
-            arr = np.expand_dims(arr, -1)
-        arr = np.transpose(arr, (2, 0, 1))  # (C, H, W)
-
-    # Tambahkan batch dim
-    arr = np.expand_dims(arr, axis=0)  # (1, H, W, C) atau (1, C, H, W)
-    return arr
-
-def classify_image(pil_img: Image.Image, model, input_shape, class_names):
-    x = preprocess_image_adaptive(pil_img, input_shape)
-    preds = model.predict(x, verbose=0)
-
-    # Output bisa sigmoid (1 unit) atau softmax (2 unit)
-    if preds.shape[-1] == 1:
-        p = float(preds.ravel()[0])
-        idx = int(p >= 0.5)
-        conf = p if idx == 1 else 1.0 - p
-    else:
-        idx = int(np.argmax(preds[0]))
-        conf = float(np.max(preds[0]))
-
-    return class_names[idx], conf
+    return model
 
 # ==============================
-# 5) UI
+# Preprocess & Predict
+# - Diset ke 128x128 RGB, rescale 1./255
+# ==============================
+IMG_SIZE = (128, 128)
+
+def preprocess_image(img: Image.Image) -> np.ndarray:
+    img = img.convert("RGB")                  # pastikan 3 channel
+    img = img.resize(IMG_SIZE)                # samakan dengan training
+    arr = np.asarray(img).astype("float32") / 255.0
+    arr = np.expand_dims(arr, axis=0)         # (1, H, W, C)
+    return arr
+
+def classify_image(
+    pil_img: Image.Image,
+    model,
+    class_names,
+    positive_label_index: int = 1,
+    threshold: float = 0.5
+):
+    x = preprocess_image(pil_img)
+    preds = model.predict(x, verbose=0)
+
+    # Handle 1-unit sigmoid vs 2-unit softmax
+    if preds.shape[-1] == 1:
+        p_pos = float(preds.ravel()[0])  # probabilitas kelas "positif" (index=1 pada biner standar)
+        # Jika positive_label_index==1 -> label index 1 adalah class_names[1]
+        # Jika positive_label_index==0 -> "positif" diartikan class_names[0]
+        if positive_label_index == 1:
+            idx = 1 if p_pos >= threshold else 0
+            conf = p_pos if idx == 1 else (1.0 - p_pos)
+        else:
+            # kebalikan mapping
+            idx = 0 if p_pos >= threshold else 1
+            conf = p_pos if idx == 0 else (1.0 - p_pos)
+    else:
+        # Softmax 2 unit
+        probs = preds[0].astype("float32")
+        idx = int(np.argmax(probs))
+        conf = float(np.max(probs))
+
+    label = class_names[idx]
+    return label, conf
+
+# ==============================
+# UI
 # ==============================
 model_name = st.selectbox("Choose a Classification Model", list(DATA.keys()))
 model_info = DATA[model_name]
 
 uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
-# Info debug (membantu kalau shape tidak cocok)
-with st.expander("ℹ️ Model & Input Info"):
-    st.write("Selected model:", model_name)
-    st.write("Weights path:", model_info["weights_path"])
-    try:
-        _m, _shape = load_model(model_info["weights_path"])
-        st.write("Model input shape:", tuple(_shape))
-    except Exception as e:
-        st.write("Model not loaded yet / error:", str(e))
+# (Opsional) threshold bisa kamu ubah kalau butuh kalibrasi
+# Sembunyikan kalau tak perlu: set show_threshold=False
+show_threshold = False
+if show_threshold:
+    threshold = st.slider("Decision threshold", 0.0, 1.0, 0.5, 0.01)
+else:
+    threshold = 0.5
 
 if uploaded_file is not None:
-    img = Image.open(uploaded_file).convert("RGB")
+    img = Image.open(uploaded_file)
 
     col1, col2, col3 = st.columns([1.2, 0.8, 1.2], gap="large")
 
@@ -177,15 +161,20 @@ if uploaded_file is not None:
 
         if run:
             try:
-                with st.spinner("Loading model & classifying..."):
-                    model, input_shape = load_model(model_info["weights_path"])
-                    label, score = classify_image(img, model, input_shape, model_info["class_names"])
+                with st.spinner("Classifying..."):
+                    model = load_model(model_info["weights_path"])
+                    label, score = classify_image(
+                        pil_img=img,
+                        model=model,
+                        class_names=model_info["class_names"],
+                        positive_label_index=model_info.get("positive_label_index", 1),
+                        threshold=threshold,
+                    )
                 st.session_state["prediction"] = {
                     "label": label,
                     "score": score,
-                    "weights": model_info["weights_path"],
                     "chosen": model_name,
-                    "input_shape": tuple(input_shape),
+                    "weights": model_info["weights_path"],
                 }
             except Exception as e:
                 st.error(f"Failed to run classification: {e}")
@@ -198,9 +187,6 @@ if uploaded_file is not None:
                 <br><br>
                 <h3>Prediction: <code>{pred['label']}</code></h3>
                 <h4>Confidence: <code>{pred['score']:.2f}</code></h4>
-                <h5>Model selected: <code>{pred['chosen']}</code></h5>
-                <h5>Weights path: <code>{pred['weights']}</code></h5>
-                <h5>Input shape: <code>{pred['input_shape']}</code></h5>
                 """,
                 unsafe_allow_html=True
             )
