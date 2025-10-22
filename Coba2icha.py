@@ -22,7 +22,7 @@ DATA = {
     "Car": {
         "class_names": ["Not a Car", "A Car"],
         "weights_path": "model/Annisa Humaira_Laporan 2.h5",
-        "positive_label_index": 1,  # ubah ke 0 jika terasa kebalik
+        "positive_label_index": 0,  # ubah ke 0 jika terasa kebalik
     },
     "Truck": {
         "class_names": ["Not a Truck", "A Truck"],
