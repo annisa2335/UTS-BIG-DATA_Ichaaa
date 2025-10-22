@@ -24,7 +24,7 @@ def get_base64_image(image_path: str) -> str:
     with open(p, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
 
-bg_img = get_base64_image("bg.jpg")
+bg_img = get_base64_image("bg.jpeg")
 if bg_img:
     st.markdown(f"""
         <style>
