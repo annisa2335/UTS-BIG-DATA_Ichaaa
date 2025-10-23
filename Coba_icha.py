@@ -135,7 +135,7 @@ if out:
         out["annotated"].save(buf, format="PNG")
         filename = f"faces_result_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         st.download_button(
-            label="⬇️ Download result image",
+            label="⬇️ Download Detection Result",
             data=buf.getvalue(),
             file_name=filename,
             mime="image/png",
