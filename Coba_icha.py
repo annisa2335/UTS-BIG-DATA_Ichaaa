@@ -160,7 +160,7 @@ if uploaded:
                 buf = BytesIO()
                 pred["annotated"].save(buf, format="PNG")
                 st.download_button(
-                    label="⬇️ Download annotated image",
+                    label="⬇️ Download Detection Result",
                     data=buf.getvalue(),
                     file_name=f"faces_result_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
                     mime="image/png",
