@@ -1,4 +1,4 @@
-# app.py — Combined Dashboard: Car/Truck Classification & Face Detection
+# app.py — Combined Dashboard with Lazy Imports (TF & YOLO)
 import streamlit as st
 import numpy as np
 from PIL import Image
@@ -6,10 +6,7 @@ from pathlib import Path
 from io import BytesIO
 import base64
 import datetime
-
-# ML libs
-import tensorflow as tf
-from ultralytics import YOLO
+import importlib
 
 # =========================
 # KONFIGURASI HALAMAN
@@ -40,9 +37,7 @@ def get_base64_image(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 def apply_background(img_candidates):
-    """
-    Coba beberapa path gambar; pertama yang ada dipakai sebagai background.
-    """
+    """Coba beberapa path gambar; pertama yang ada dipakai sebagai background."""
     for p in img_candidates:
         b64 = get_base64_image(p)
         if b64:
@@ -67,7 +62,24 @@ def apply_background(img_candidates):
                 unsafe_allow_html=True
             )
             return
-    # jika tak ada background, tetap lanjut tanpa CSS khusus
+
+# =========================
+# UTIL: Environment Check (sidebar)
+# =========================
+def _can_import(modname):
+    try:
+        importlib.import_module(modname)
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+with st.sidebar.expander("🔧 Environment check"):
+    ok_tf, err_tf     = _can_import("tensorflow")
+    ok_cv2, err_cv2   = _can_import("cv2")
+    ok_torch, err_trc = _can_import("torch")
+    st.write("tensorflow:", "✅ OK" if ok_tf else f"❌ {err_tf[:120]}...")
+    st.write("cv2 (OpenCV):", "✅ OK" if ok_cv2 else f"❌ {err_cv2[:120]}...")
+    st.write("torch:", "✅ OK" if ok_torch else f"❌ {err_trc[:120]}...")
 
 # =========================
 # SIDEBAR MENU
@@ -80,19 +92,26 @@ page = st.sidebar.radio(
 )
 
 # =========================
-# ========== HALAMAN 1: CAR vs TRUCK ==========
+# ========== HALAMAN 1: CAR vs TRUCK (TF) ==========
 # =========================
 if page == "Car vs Truck":
-    # background untuk halaman ini
-    apply_background(["bg.jpg"])  # pakai bg.jpg seperti di code 1
-
+    apply_background(["bg.jpg"])  # background halaman ini
     st.markdown('<div class="title">Car or Truck Classification</div>', unsafe_allow_html=True)
 
-    # ---------- Model cache ----------
+    # ---------- Model loader (lazy import TF) ----------
     @st.cache_resource(show_spinner=False)
-    def load_ct_model():
-        model = tf.keras.models.load_model(CT_MODEL_PATH)
-        return model
+    def load_ct_model(path: str):
+        try:
+            import tensorflow as tf  # lazy import
+        except Exception as e:
+            st.session_state["ct_import_error"] = f"Gagal import TensorFlow: {e}"
+            return None
+        try:
+            model = tf.keras.models.load_model(path)
+            return model
+        except Exception as e:
+            st.session_state["ct_load_error"] = f"Gagal load model .h5: {e}"
+            return None
 
     # ---------- Preprocess & Predict ----------
     def ct_preprocess_image(img: Image.Image):
@@ -102,12 +121,12 @@ if page == "Car vs Truck":
 
     def ct_predict(img: Image.Image, model):
         """
-        Asumsi output model: probabilitas 'Car' di indeks 0 (seperti code 1).
-        Jika >= 0.5 -> label 'Car', else 'Truck'. Confidence menyesuaikan.
+        Asumsi output model: probabilitas 'Car' pada indeks 0 (sesuai code awal).
+        Jika >= 0.5 -> 'Car', else 'Truck'. Confidence menyesuaikan.
         """
         x = ct_preprocess_image(img)
         preds = model.predict(x, verbose=0)
-        p_car = float(preds.ravel()[0])  # raw prob of Car
+        p_car = float(preds.ravel()[0])
 
         if p_car >= 0.5:
             label = "Car"
@@ -118,7 +137,11 @@ if page == "Car vs Truck":
         return label, conf, p_car
 
     # ---------- UI ----------
-    uploaded_ct = st.file_uploader("Upload an image (JPG/PNG) untuk klasifikasi Car/Truck", type=["jpg", "jpeg", "png"], key="ct_uploader")
+    uploaded_ct = st.file_uploader(
+        "Upload an image (JPG/PNG) untuk klasifikasi Car/Truck",
+        type=["jpg", "jpeg", "png"],
+        key="ct_uploader"
+    )
 
     if uploaded_ct:
         ct_img = Image.open(uploaded_ct)
@@ -132,7 +155,16 @@ if page == "Car vs Truck":
             st.markdown("<br><br>", unsafe_allow_html=True)
             if st.button("Run Classification", use_container_width=True, key="ct_run"):
                 with st.spinner("Classifying..."):
-                    ct_model = load_ct_model()
+                    ct_model = load_ct_model(CT_MODEL_PATH)
+                    if ct_model is None:
+                        # tampilkan error yang ditangkap
+                        if "ct_import_error" in st.session_state:
+                            st.error(st.session_state["ct_import_error"])
+                        elif "ct_load_error" in st.session_state:
+                            st.error(st.session_state["ct_load_error"])
+                        else:
+                            st.error("Model belum siap. Periksa environment & path model.")
+                        st.stop()
                     label, conf, raw_car = ct_predict(ct_img, ct_model)
 
                 st.session_state["ct_prediction"] = {
@@ -157,22 +189,29 @@ if page == "Car vs Truck":
                 )
 
 # =========================
-# ========== HALAMAN 2: FACE DETECTION ==========
+# ========== HALAMAN 2: FACE DETECTION (YOLO) ==========
 # =========================
 else:
-    # background untuk halaman ini
-    apply_background(["bg2.jpg", "bg.jpeg"])  # sesuai code 2
-
+    apply_background(["bg2.jpg", "bg.jpeg"])  # background halaman ini
     st.markdown('<div class="title">Face Detection: Real / Sketch / Synthetic</div>', unsafe_allow_html=True)
 
-    # ---------- Model cache ----------
+    # ---------- Model loader (lazy import Ultralytics) ----------
     @st.cache_resource(show_spinner=False)
     def load_fd_model(path: str):
-        return YOLO(path)
+        try:
+            from ultralytics import YOLO  # lazy import
+        except Exception as e:
+            st.session_state["fd_import_error"] = f"Gagal import Ultralytics/YOLO: {e}"
+            return None
+        try:
+            return YOLO(path)
+        except Exception as e:
+            st.session_state["fd_load_error"] = f"Gagal load model .pt: {e}"
+            return None
 
     def fd_map_class_names(model) -> dict:
         """
-        Samakan nama kelas berdasarkan kata kunci agar tidak kebalik:
+        Samakan nama kelas berdasarkan kata kunci:
         Real Face / Sketch Face / Synthetic Face
         """
         raw = model.names if hasattr(model, "names") else {}
@@ -210,7 +249,11 @@ else:
         return label, conf
 
     # ---------- UI ----------
-    uploaded_fd = st.file_uploader("Upload an image (JPG/PNG) untuk Face Detection", type=["jpg", "jpeg", "png"], key="fd_uploader")
+    uploaded_fd = st.file_uploader(
+        "Upload an image (JPG/PNG) untuk Face Detection",
+        type=["jpg", "jpeg", "png"],
+        key="fd_uploader"
+    )
 
     if uploaded_fd:
         fd_img = Image.open(uploaded_fd).convert("RGB")
@@ -227,6 +270,15 @@ else:
             if st.button("Run Classification", use_container_width=True, key="fd_run"):
                 with st.spinner("Detecting..."):
                     fd_model = load_fd_model(FD_MODEL_PATH)
+                    if fd_model is None:
+                        if "fd_import_error" in st.session_state:
+                            st.error(st.session_state["fd_import_error"])
+                        elif "fd_load_error" in st.session_state:
+                            st.error(st.session_state["fd_load_error"])
+                        else:
+                            st.error("Model YOLO belum siap. Periksa environment & path model.")
+                        st.stop()
+
                     names = fd_map_class_names(fd_model)
                     results = fd_model(
                         fd_img, conf=FD_CONF_THRESH, iou=FD_IOU_THRESH,
@@ -271,4 +323,3 @@ else:
                         mime="image/png",
                         use_container_width=True
                     )
-
