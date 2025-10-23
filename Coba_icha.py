@@ -24,7 +24,7 @@ def get_base64_image(image_path: str) -> str:
     with open(p, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
 
-bg_img = get_base64_image("bg.jpeg")
+bg_img = get_base64_image("bg2.jpg")
 if bg_img:
     st.markdown(
         f"""
@@ -135,7 +135,7 @@ if out:
         out["annotated"].save(buf, format="PNG")
         filename = f"faces_result_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         st.download_button(
-            label="⬇️ Download annotated image",
+            label="⬇️ Download result image",
             data=buf.getvalue(),
             file_name=filename,
             mime="image/png",
