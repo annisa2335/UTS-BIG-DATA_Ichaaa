@@ -1,4 +1,4 @@
-# faces_detector_simple.py
+# faces_detector_layout_like_classifier.py
 import streamlit as st
 import numpy as np
 from PIL import Image
@@ -9,10 +9,14 @@ import base64
 import datetime
 
 # =========================
-# KONFIGURASI
+# KONFIGURASI HALAMAN
 # =========================
-st.set_page_config(page_title="Face Detector (Real / Sketch / Synthetic)", layout="wide")
+st.set_page_config(page_title="Face Detection (Real / Sketch / Synthetic)", layout="wide")
+
 MODEL_PATH = "model/Annisa Humaira_Laporan 4.pt"
+CONF_THRESH = 0.50
+IOU_THRESH  = 0.50
+IMGSZ       = 640
 
 # =========================
 # BACKGROUND (opsional)
@@ -22,9 +26,10 @@ def get_base64_image(image_path: str) -> str:
     if not p.exists():
         return ""
     with open(p, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
+        import base64 as _b64
+        return _b64.b64encode(f.read()).decode("utf-8")
 
-bg_img = get_base64_image("bg2.jpg")
+bg_img = get_base64_image("bg2.jpg") or get_base64_image("bg.jpeg")
 if bg_img:
     st.markdown(
         f"""
@@ -50,14 +55,17 @@ if bg_img:
 st.markdown('<div class="title">Face Detection: Real / Sketch / Synthetic</div>', unsafe_allow_html=True)
 
 # =========================
-# LOAD MODEL
+# MODEL (cache)
 # =========================
 @st.cache_resource(show_spinner=False)
 def load_model(path: str):
     return YOLO(path)
 
-def get_class_names(model) -> dict:
-    """Map nama asli model ke label Real/Sketch/Synthetic"""
+def map_class_names(model) -> dict:
+    """
+    Samakan nama kelas berdasarkan kata kunci agar tidak kebalik:
+    Real Face / Sketch Face / Synthetic Face
+    """
     raw = model.names if hasattr(model, "names") else {}
     mapped = {}
     for cid, name in raw.items():
@@ -72,21 +80,25 @@ def get_class_names(model) -> dict:
             mapped[cid] = name.replace("_", " ").title()
     return mapped
 
-def draw_and_get_image(result):
-    """Convert hasil YOLO (BGR) ke PIL RGB"""
-    bgr = result.plot()
-    rgb = bgr[:, :, ::-1]
+def annotate_image(result):
+    """Kembalikan PIL image beranotasi dari result YOLO."""
+    bgr = result.plot()            # ndarray BGR
+    rgb = bgr[:, :, ::-1]         # ke RGB
     return Image.fromarray(rgb)
 
-def summarize_counts(result, names: dict):
+def top_detection(result, names: dict):
+    """
+    Ambil 1 deteksi dengan confidence tertinggi.
+    Return (label, conf) atau (None, None) jika tidak ada.
+    """
     if result.boxes is None or len(result.boxes) == 0:
-        return []
-    cls_ids = result.boxes.cls.cpu().numpy().astype(int)
+        return None, None
     confs = result.boxes.conf.cpu().numpy()
-    dets = []
-    for cid, conf in zip(cls_ids, confs):
-        dets.append((names.get(cid, str(cid)), float(conf)))
-    return dets
+    clses = result.boxes.cls.cpu().numpy().astype(int)
+    idx = int(np.argmax(confs))
+    label = names.get(clses[idx], str(clses[idx]))
+    conf  = float(confs[idx])
+    return label, conf
 
 # =========================
 # UPLOAD
@@ -94,58 +106,63 @@ def summarize_counts(result, names: dict):
 uploaded = st.file_uploader("Upload an image (JPG/PNG)", type=["jpg", "jpeg", "png"])
 
 # =========================
-# INFERENCE
+# INFERENCE + LAYOUT 3 KOLOM
 # =========================
 if uploaded:
     img = Image.open(uploaded).convert("RGB")
 
-    col1, col2 = st.columns([1.25, 1.0], gap="large")
+    col1, col2, col3 = st.columns([1.2, 0.9, 1.2], gap="large")
 
+    # Kiri: gambar upload (seperti classifier)
     with col1:
         st.image(img, caption="Uploaded Image", use_container_width=True)
 
+    # Tengah: tombol Run (centered look)
     with col2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Run Detection", use_container_width=True):
-            with st.spinner("Detecting faces..."):
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        if st.button("Run Classification", use_container_width=True):
+            with st.spinner("Detecting..."):
                 model = load_model(MODEL_PATH)
-                names = get_class_names(model)
-
-                results = model(img, conf=0.5, iou=0.5, imgsz=640, verbose=False)
+                names = map_class_names(model)
+                results = model(img, conf=CONF_THRESH, iou=IOU_THRESH, imgsz=IMGSZ, verbose=False)
                 result = results[0]
-                annotated = draw_and_get_image(result)
-                detections = summarize_counts(result, names)
 
-            st.session_state["output"] = {
-                "annotated": annotated,
-                "detections": detections
+                # Ambil hasil utama
+                pred_label, pred_conf = top_detection(result, names)
+                annotated = annotate_image(result)
+
+            st.session_state["pred"] = {
+                "label": pred_label,
+                "conf": pred_conf,
+                "annotated": annotated
             }
 
-# =========================
-# HASIL DETEKSI
-# =========================
-out = st.session_state.get("output")
-if out:
-    colA, colB = st.columns([1.25, 1.0], gap="large")
+    # Kanan: hasil (hanya label + confidence) — sama gaya dengan classifier
+    with col3:
+        pred = st.session_state.get("pred")
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        if pred:
+            if pred["label"] is not None:
+                st.markdown(
+                    f"""
+                    <h2>Prediction: <span style="background:#e6f4ea;border-radius:8px;padding:4px 10px;">
+                    {pred['label']}</span></h2>
+                    <h3>Confidence: <span style="background:#e6f4ea;border-radius:8px;padding:2px 8px;">
+                    {pred['conf']:.2f}</span></h3>
+                    """,
+                    unsafe_allow_html=True
+                )
+            else:
+                st.warning("No faces detected.")
 
-    with colA:
-        st.image(out["annotated"], caption="Detections", use_container_width=True)
-
-        buf = BytesIO()
-        out["annotated"].save(buf, format="PNG")
-        filename = f"faces_result_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        st.download_button(
-            label="⬇️ Download Detection Result",
-            data=buf.getvalue(),
-            file_name=filename,
-            mime="image/png",
-            use_container_width=True
-        )
-
-    with colB:
-        st.markdown("## Detection Result")
-        if out["detections"]:
-            for label, conf in out["detections"]:
-                st.markdown(f"- **{label}** — Confidence: `{conf:.2f}`")
-        else:
-            st.info("No faces detected.")
+            # (opsional) tombol download hasil anotasi
+            if pred.get("annotated") is not None:
+                buf = BytesIO()
+                pred["annotated"].save(buf, format="PNG")
+                st.download_button(
+                    label="⬇️ Download annotated image",
+                    data=buf.getvalue(),
+                    file_name=f"faces_result_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                    mime="image/png",
+                    use_container_width=True
+                )
