@@ -23,7 +23,7 @@ FD_IOU_THRESH  = 0.50
 FD_IMGSZ       = 640
 
 # =========================
-# UTIL BACKGROUND
+# BACKGROUND FUNGSI
 # =========================
 def get_base64_image(image_path: str) -> str:
     p = Path(image_path)
@@ -33,6 +33,7 @@ def get_base64_image(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 def apply_background(img_candidates):
+    """Coba beberapa path gambar; pertama yang ada dipakai sebagai background."""
     for p in img_candidates:
         b64 = get_base64_image(p)
         if b64:
@@ -56,10 +57,10 @@ def apply_background(img_candidates):
                 """,
                 unsafe_allow_html=True
             )
-            break
+            return
 
 # =========================
-# UTIL ENV CHECK
+# ENVIRONMENT CHECK (Sidebar)
 # =========================
 def _can_import(modname):
     try:
@@ -67,15 +68,6 @@ def _can_import(modname):
         return True, ""
     except Exception as e:
         return False, str(e)
-
-def _cv2_is_headless():
-    """Return True jika OpenCV dapat di-import (headless wheel)."""
-    try:
-        importlib.import_module("cv2")
-        return True
-    except Exception as e:
-        st.error(f"OpenCV belum siap (kemungkinan non-headless): {e}")
-        return False
 
 with st.sidebar.expander("🔧 Environment check"):
     ok_tf, err_tf     = _can_import("tensorflow")
@@ -96,13 +88,13 @@ page = st.sidebar.radio(
 )
 
 # ====================================================
-# =============== HALAMAN 1: CAR/TRUCK ===============
+# ================= HALAMAN 1 ========================
 # ====================================================
 if page == "Car vs Truck":
     apply_background(["bg.jpg"])
     st.markdown('<div class="title">Car or Truck Classification</div>', unsafe_allow_html=True)
 
-    # Lazy import + cache TF model
+    # ---------- Lazy import TensorFlow ----------
     @st.cache_resource(show_spinner=False)
     def load_ct_model(path: str):
         try:
@@ -116,41 +108,38 @@ if page == "Car vs Truck":
             st.error(f"Gagal load model .h5: {e}")
             return None
 
-    def ct_preprocess(img: Image.Image):
+    def ct_preprocess_image(img: Image.Image):
         img = img.convert("RGB").resize(CT_IMG_SIZE)
         x = np.asarray(img).astype("float32") / 255.0
         return np.expand_dims(x, 0)
 
     def ct_predict(img: Image.Image, model):
-        x = ct_preprocess(img)
+        x = ct_preprocess_image(img)
         preds = model.predict(x, verbose=0)
         p_car = float(preds.ravel()[0])
         label = "Car" if p_car >= 0.5 else "Truck"
         conf = p_car if p_car >= 0.5 else 1 - p_car
         return label, conf, p_car
 
-    uploaded_ct = st.file_uploader(
-        "Upload image (JPG/PNG) untuk klasifikasi Car/Truck",
-        type=["jpg", "jpeg", "png"],
-        key="ct_upload",
-    )
+    uploaded_ct = st.file_uploader("Upload image (JPG/PNG) untuk klasifikasi Car/Truck",
+                                   type=["jpg", "jpeg", "png"],
+                                   key="ct_upload")
 
     if uploaded_ct:
-        img_ct = Image.open(uploaded_ct)
+        ct_img = Image.open(uploaded_ct)
         col1, col2, col3 = st.columns([1.2, 0.8, 1.2])
 
         with col1:
-            st.image(img_ct, caption="Uploaded Image", use_container_width=True)
+            st.image(ct_img, caption="Uploaded Image", use_container_width=True)
 
         with col2:
             st.markdown("<br><br>", unsafe_allow_html=True)
             if st.button("Run Classification", use_container_width=True, key="ct_run"):
                 with st.spinner("Classifying..."):
                     model = load_ct_model(CT_MODEL_PATH)
-                    if not model:
-                        st.stop()
-                    label, conf, raw = ct_predict(img_ct, model)
-                    st.session_state["ct_pred"] = {"label": label, "conf": conf, "raw": raw}
+                    if model:
+                        label, conf, raw = ct_predict(ct_img, model)
+                        st.session_state["ct_pred"] = {"label": label, "conf": conf, "raw": raw}
 
         with col3:
             pred = st.session_state.get("ct_pred")
@@ -166,13 +155,13 @@ if page == "Car vs Truck":
                 )
 
 # ====================================================
-# ============ HALAMAN 2: FACE DETECTION ============
+# ================= HALAMAN 2 ========================
 # ====================================================
 else:
     apply_background(["bg2.jpg", "bg.jpeg"])
     st.markdown('<div class="title">Face Detection: Real / Sketch / Synthetic</div>', unsafe_allow_html=True)
 
-    # Lazy import + cache YOLO model
+    # ---------- Lazy import YOLO ----------
     @st.cache_resource(show_spinner=False)
     def load_fd_model(path: str):
         try:
@@ -186,7 +175,7 @@ else:
             st.error(f"Gagal load model .pt: {e}")
             return None
 
-    def fd_map_names(model) -> dict:
+    def fd_map_class_names(model) -> dict:
         raw = model.names if hasattr(model, "names") else {}
         mapped = {}
         for cid, name in raw.items():
@@ -201,47 +190,57 @@ else:
                 mapped[cid] = name.replace("_", " ").title()
         return mapped
 
-    def fd_annotate(res):
-        bgr = res.plot()
+    def fd_annotate_image(result):
+        bgr = result.plot()
         rgb = bgr[:, :, ::-1]
         return Image.fromarray(rgb)
 
-    def fd_top_det(res, names):
-        if res.boxes is None or len(res.boxes) == 0:
+    def fd_top_detection(result, names):
+        if result.boxes is None or len(result.boxes) == 0:
             return None, None
-        confs = res.boxes.conf.cpu().numpy()
-        clses = res.boxes.cls.cpu().numpy().astype(int)
-        i = int(np.argmax(confs))
-        return names.get(clses[i], str(clses[i])), float(confs[i])
+        confs = result.boxes.conf.cpu().numpy()
+        clses = result.boxes.cls.cpu().numpy().astype(int)
+        idx = int(np.argmax(confs))
+        return names.get(clses[idx], str(clses[idx])), float(confs[idx])
 
-    uploaded_fd = st.file_uploader(
-        "Upload image (JPG/PNG) untuk Face Detection",
-        type=["jpg", "jpeg", "png"],
-        key="fd_upload",
-    )
+    # ---------- CEK OpenCV HEADLESS ----------
+    def _cv2_is_headless():
+        try:
+            cv2 = importlib.import_module("cv2")
+            # headless tidak punya GUI binding (libGL)
+            if hasattr(cv2, "imshow"):
+                return True
+            return True
+        except Exception as e:
+            st.error(f"OpenCV error (kemungkinan bukan headless): {e}")
+            return False
+
+    # ---------- UI ----------
+    uploaded_fd = st.file_uploader("Upload image (JPG/PNG) untuk Face Detection",
+                                   type=["jpg", "jpeg", "png"],
+                                   key="fd_upload")
 
     if uploaded_fd:
-        img_fd = Image.open(uploaded_fd).convert("RGB")
+        fd_img = Image.open(uploaded_fd).convert("RGB")
         col1, col2, col3 = st.columns([1.2, 0.8, 1.2])
 
         with col1:
-            st.image(img_fd, caption="Uploaded Image", use_container_width=True)
+            st.image(fd_img, caption="Uploaded Image", use_container_width=True)
 
         with col2:
             st.markdown("<br><br>", unsafe_allow_html=True)
             if st.button("Run Classification", use_container_width=True, key="fd_run"):
-                # cek OpenCV headless saat tombol ditekan (BUKAN di top-level)
                 if not _cv2_is_headless():
                     st.stop()
                 with st.spinner("Detecting..."):
                     model = load_fd_model(FD_MODEL_PATH)
                     if not model:
                         st.stop()
-                    names = fd_map_names(model)
-                    results = model(img_fd, conf=FD_CONF_THRESH, iou=FD_IOU_THRESH, imgsz=FD_IMGSZ, verbose=False)
-                    res = results[0]
-                    label, conf = fd_top_det(res, names)
-                    annotated = fd_annotate(res)
+                    names = fd_map_class_names(model)
+                    results = model(fd_img, conf=FD_CONF_THRESH, iou=FD_IOU_THRESH, imgsz=FD_IMGSZ, verbose=False)
+                    result = results[0]
+                    label, conf = fd_top_detection(result, names)
+                    annotated = fd_annotate_image(result)
                     st.session_state["fd_pred"] = {"label": label, "conf": conf, "annotated": annotated}
 
         with col3:
