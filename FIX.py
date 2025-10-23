@@ -1,4 +1,3 @@
-# FIX.py — Combined Dashboard with auto-fix for OpenCV/Ultralytics import
 import streamlit as st
 import numpy as np
 from PIL import Image
@@ -64,7 +63,7 @@ def apply_background(img_candidates):
             )
             return
 
-def pip_install(pkgs: list[str]) -> tuple[bool, str]:
+def pip_install(pkgs):
     """Install packages via pip; return (ok, log)."""
     try:
         cmd = [sys.executable, "-m", "pip", "install", "--no-input"] + pkgs
@@ -73,12 +72,12 @@ def pip_install(pkgs: list[str]) -> tuple[bool, str]:
     except subprocess.CalledProcessError as e:
         return False, e.output
 
-# ---------- Dependency guards for Ultralytics/OpenCV ----------
-def ensure_ultralytics_ready() -> tuple[object, object] | None:
+# ---------- Dependency guards (LAZY & SAFE) ----------
+def ensure_ultralytics_ready():
     """
     Ensure cv2 and ultralytics are importable.
-    Tries to install opencv-python-headless and ultralytics if missing.
-    Returns (ultralytics_module, YOLO_class) on success, else None (and prints error to UI).
+    Try to install opencv-python-headless and ultralytics if missing.
+    Return (ultralytics_module, YOLO_class) or None if still unavailable.
     """
     try:
         import cv2  # noqa: F401
@@ -87,56 +86,43 @@ def ensure_ultralytics_ready() -> tuple[object, object] | None:
         return ultralytics, YOLO
     except Exception:
         with st.spinner("Menyiapkan dependensi YOLO (OpenCV & Ultralytics)..."):
-            # NOTE: Banyak wheel saat ini stabil di Python 3.10–3.12.
-            # Untuk Python 3.13, beberapa wheel mungkin belum tersedia.
-            # Kita coba pasang paket headless yang umum.
-            ok1, log1 = pip_install([
-                # pin konservatif untuk kompatibilitas luas
-                "opencv-python-headless<5.0",
-            ])
-            # Coba pasang/upgrade ultralytics juga (aman jika sudah ada)
-            ok2, log2 = pip_install([
-                "ultralytics>=8.2.0,<9.0.0",
-                "numpy>=1.23"  # berjaga agar kompatibel dengan cv2
-            ])
-        # Coba import ulang
+            # NOTE: gunakan versi yang umum kompatibel di banyak environment
+            pip_install(["opencv-python-headless<5.0"])
+            pip_install(["ultralytics>=8.2.0,<9.0.0", "numpy>=1.23"])
         try:
             import cv2  # noqa: F401
             from ultralytics import YOLO
             import ultralytics
-            st.success("Dependensi YOLO siap. App akan reload…")
+            st.success("Dependensi YOLO siap. Reloading…")
             st.rerun()
         except Exception as e2:
             st.error(
                 "Gagal menyiapkan `cv2/ultralytics` secara otomatis.\n\n"
-                "Tips cepat:\n"
-                "• Pastikan versi Python 3.10–3.12.\n"
+                "Saran:\n"
+                "• Gunakan Python 3.10–3.12 untuk kompatibilitas wheel yang lebih stabil.\n"
                 "• Tambahkan ke requirements.txt: `opencv-python-headless<5.0` dan `ultralytics>=8.2.0,<9.0.0`.\n"
-                "• Jika di Streamlit Cloud, commit requirements.txt lalu redeploy.\n\n"
-                f"Detail error terakhir:\n{e2}"
+                f"Detail error: {e2}"
             )
             return None
 
-# ---------- Lazy import TensorFlow ----------
 def ensure_tensorflow_ready():
+    """Ensure TensorFlow is importable; try to install if missing."""
     try:
         import tensorflow as tf  # noqa: F401
         return True
     except Exception:
         with st.spinner("Menyiapkan TensorFlow…"):
-            ok, log = pip_install([
-                # Pilih versi yang umum tersedia di banyak env Cloud (ubah bila perlu)
-                "tensorflow-cpu>=2.12,<3.0"
-            ])
+            # versi CPU yang relatif aman untuk banyak environment cloud
+            pip_install(["tensorflow-cpu>=2.12,<3.0"])
         try:
             import tensorflow as tf  # noqa: F401
-            st.success("TensorFlow siap. App akan reload…")
+            st.success("TensorFlow siap. Reloading…")
             st.rerun()
         except Exception as e:
             st.error(
-                "TensorFlow belum tersedia atau tidak kompatibel dengan environment saat ini.\n\n"
+                "TensorFlow belum tersedia / tidak kompatibel di environment saat ini.\n\n"
                 "Saran:\n"
-                "• Gunakan Python 3.10–3.11 untuk kompatibilitas TensorFlow yang lebih stabil.\n"
+                "• Pakai Python 3.10–3.11 untuk kompatibilitas yang lebih stabil.\n"
                 "• Tambahkan `tensorflow-cpu>=2.12,<3.0` ke requirements.txt.\n"
                 f"Detail error: {e}"
             )
@@ -157,11 +143,9 @@ page = st.sidebar.radio(
 # ========== HALAMAN 1: CAR vs TRUCK ==========
 # =========================
 if page == "Car vs Truck":
-    # background halaman ini
-    apply_background(["bg.jpg"])
+    apply_background(["bg.jpg"])  # background khusus halaman ini
     st.markdown('<div class="title">Car or Truck Classification</div>', unsafe_allow_html=True)
 
-    # Pastikan TensorFlow tersedia (lazy)
     if ensure_tensorflow_ready():
         import tensorflow as tf  # safe now
 
@@ -178,7 +162,7 @@ if page == "Car vs Truck":
         def ct_predict(img: Image.Image, model):
             x = ct_preprocess_image(img)
             preds = model.predict(x, verbose=0)
-            p_car = float(preds.ravel()[0])  # raw prob of Car
+            p_car = float(preds.ravel()[0])  # raw prob of Car (asumsi output 1-neuron sigmoid)
             if p_car >= 0.5:
                 label, conf = "Car", p_car
             else:
@@ -227,11 +211,9 @@ if page == "Car vs Truck":
 # ========== HALAMAN 2: FACE DETECTION ==========
 # =========================
 else:
-    # background halaman ini
-    apply_background(["bg2.jpg", "bg.jpeg"])
+    apply_background(["bg2.jpg", "bg.jpeg"])  # background khusus halaman ini
     st.markdown('<div class="title">Face Detection: Real / Sketch / Synthetic</div>', unsafe_allow_html=True)
 
-    # Pastikan ultralytics & cv2 siap (lazy)
     ready = ensure_ultralytics_ready()
     if ready is not None:
         ultralytics, YOLO = ready  # type: ignore
