@@ -32,7 +32,7 @@ except Exception as e:
 # =========================
 # KONFIG & STATE
 # =========================
-st.set_page_config(page_title="Dual Vision: Detection & Classification", layout="wide")
+st.set_page_config(page_title="Dashboard", layout="wide")
 if "page" not in st.session_state:
     st.session_state.page = "home"  # home | detect | classify
 if "det_output" not in st.session_state:
@@ -58,7 +58,7 @@ def get_base64_image(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 bg_img = ""
-for cand in ["bg.jpeg", "bg.jpg"]:
+for cand in ["bg.jpg"]:
     bg_img = get_base64_image(cand)
     if bg_img:
         break
@@ -199,9 +199,9 @@ def page_home():
     st.markdown(
         """
         <div class="hero">
-            <h1>Dual Vision Dashboard</h1>
-            <p>All-in-one dashboard untuk <b>Deteksi Objek (YOLOv8)</b> dan <b>Klasifikasi Gambar (Keras)</b>.
-               Pilih mode yang kamu butuhkan — aplikasi ini dirancang ringan, cepat, dan mudah dipakai.</p>
+            <h1>Dashboard</h1>
+            <p>Dashboard untuk <b>Deteksi Objek</b> dan <b>Klasifikasi Gambar</b>.
+               Aplikasi ini dirancang ringan, cepat, dan mudah dipakai. Pilih mode yang kamu butuhkan</p>
         </div>
         """,
         unsafe_allow_html=True
@@ -213,9 +213,8 @@ def page_home():
             """
             <div class="card">
                 <span class="pill">Computer Vision</span>
-                <h3>Face Detection (Real / Sketch / Synthetic)</h3>
-                <p class="muted">Model YOLOv8 (.pt) untuk mendeteksi wajah sekaligus
-                mengelompokkan jenisnya (real, sketch, synthetic) dengan hasil anotasi siap unduh.</p>
+                <h3>Face Detection</h3>
+                <p class="muted">Model YOLOv8 (.pt) Untuk mendeteksi wajah (real, sketch, synthetic).</p>
                 """,
             unsafe_allow_html=True
         )
@@ -229,8 +228,8 @@ def page_home():
             <div class="card">
                 <span class="pill">Deep Learning</span>
                 <h3>Car vs Truck Classification</h3>
-                <p class="muted">Model Keras (.h5) untuk mengklasifikasi gambar kendaraan menjadi
-                <i>Car</i> atau <i>Truck</i>. Tampilkan probabilitas dan confidence.</p>
+                <p class="muted">Model Keras (.h5) Untuk mengklasifikasi gambar kendaraan menjadi
+                <i>Car</i> atau <i>Truck</i>.</p>
             """,
             unsafe_allow_html=True
         )
@@ -252,7 +251,7 @@ def page_home():
 
 # ========== DETECTION ==========
 def page_detect():
-    st.markdown("### 🔎 Face Detection (YOLOv8) — Real / Sketch / Synthetic")
+    st.markdown("### 🔎 Face Detection — Real / Sketch / Synthetic")
     st.caption(f"Model: `{YOLO_MODEL_PATH}`")
 
     with st.expander("🔧 Pengaturan"):
@@ -309,7 +308,7 @@ def page_detect():
 
 # ========== CLASSIFICATION ==========
 def page_classify():
-    st.markdown("### 🏷️ Car vs Truck Classification (Keras)")
+    st.markdown("### 🏷️ Car vs Truck Classification")
     st.caption(f"Model: `{KERAS_MODEL_PATH}`")
 
     with st.expander("🔧 Pengaturan"):
