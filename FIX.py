@@ -1,10 +1,3 @@
-# app_ui.py
-# =========================================================
-# Streamlit App (UI revamped):
-# Landing Page -> Pilih Fitur -> (Face Detection | Car/Truck Classification)
-# =========================================================
-# pip install streamlit ultralytics tensorflow pillow numpy opencv-python
-# =========================================================
 import io
 import base64
 import datetime
@@ -32,7 +25,7 @@ except Exception as e:
 # =========================
 # KONFIG & STATE
 # =========================
-st.set_page_config(page_title="Dual Vision: Detection & Classification", layout="wide")
+st.set_page_config(page_title="Dashboard ...", layout="wide")
 if "page" not in st.session_state:
     st.session_state.page = "home"  # home | detect | classify
 if "det_output" not in st.session_state:
@@ -58,7 +51,7 @@ def get_base64_image(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 bg_img = ""
-for cand in ["bg.jpeg", "bg.jpg"]:
+for cand in ["bg.jpg"]:
     bg_img = get_base64_image(cand)
     if bg_img:
         break
@@ -199,9 +192,9 @@ def page_home():
     st.markdown(
         """
         <div class="hero">
-            <h1>Dual Vision Dashboard</h1>
-            <p>All-in-one dashboard untuk <b>Deteksi Objek (YOLOv8)</b> dan <b>Klasifikasi Gambar (Keras)</b>.
-               Pilih mode yang kamu butuhkan — aplikasi ini dirancang ringan, cepat, dan mudah dipakai.</p>
+            <h1>Dashboard ...</h1>
+            <p>Dashboard untuk <b>Deteksi Objek</b> dan <b>Klasifikasi Gambar</b>.
+               Aplikasi ini dirancang ringan, cepat, dan mudah dipakai. Pilih mode yang kamu butuhkan</p>
         </div>
         """,
         unsafe_allow_html=True
@@ -213,9 +206,8 @@ def page_home():
             """
             <div class="card">
                 <span class="pill">Computer Vision</span>
-                <h3>Face Detection (Real / Sketch / Synthetic)</h3>
-                <p class="muted">Model YOLOv8 (.pt) untuk mendeteksi wajah sekaligus
-                mengelompokkan jenisnya (real, sketch, synthetic) dengan hasil anotasi siap unduh.</p>
+                <h3>Face Detection</h3>
+                <p class="muted">Untuk mendeteksi wajah (real, sketch, synthetic).</p>
                 """,
             unsafe_allow_html=True
         )
@@ -229,8 +221,8 @@ def page_home():
             <div class="card">
                 <span class="pill">Deep Learning</span>
                 <h3>Car vs Truck Classification</h3>
-                <p class="muted">Model Keras (.h5) untuk mengklasifikasi gambar kendaraan menjadi
-                <i>Car</i> atau <i>Truck</i>. Tampilkan probabilitas dan confidence.</p>
+                <p class="muted">Untuk mengklasifikasi gambar kendaraan menjadi
+                <i>Car</i> atau <i>Truck</i>.</p>
             """,
             unsafe_allow_html=True
         )
@@ -238,28 +230,10 @@ def page_home():
             go("classify")
         st.markdown("</div>", unsafe_allow_html=True)
 
-    st.write("")
-    with st.expander("ℹ️ Tips"):
-        st.markdown(
-            """
-            - Pastikan file model berada di path default:  
-              • YOLO: `model/Annisa Humaira_Laporan 4.pt`  
-              • Keras: `model/Annisa Humaira_Laporan 2.h5`  
-            - Kamu bisa mengganti file model tersebut sesuai kebutuhan.
-            - Gambar terbaik: JPG/PNG dengan kualitas jelas dan ukuran tidak terlalu kecil.
-            """
-        )
-
 # ========== DETECTION ==========
 def page_detect():
-    st.markdown("### 🔎 Face Detection (YOLOv8) — Real / Sketch / Synthetic")
+    st.markdown("### 🔎 Face Detection — Real / Sketch / Synthetic")
     st.caption(f"Model: `{YOLO_MODEL_PATH}`")
-
-    with st.expander("🔧 Pengaturan"):
-        conf_det = st.slider("Confidence", 0.1, 0.95, 0.5, 0.05, key="conf_det")
-        iou_det = st.slider("NMS IoU", 0.1, 0.95, 0.5, 0.05, key="iou_det")
-        imgsz_det = st.select_slider("Image size (inference)", options=[320, 416, 480, 512, 640, 800, 960], value=640, key="imgsz_det")
-        show_btn = st.checkbox("Tampilkan tombol Download hasil anotasi", value=True, key="show_dl")
 
     uploaded = st.file_uploader("Upload gambar (JPG/PNG)", type=["jpg", "jpeg", "png"], key="up_det")
     if st.button("← Kembali ke Dashboard", type="secondary"):
@@ -309,11 +283,9 @@ def page_detect():
 
 # ========== CLASSIFICATION ==========
 def page_classify():
-    st.markdown("### 🏷️ Car vs Truck Classification (Keras)")
+    st.markdown("### 🏷️ Car vs Truck Classification")
     st.caption(f"Model: `{KERAS_MODEL_PATH}`")
-
-    with st.expander("🔧 Pengaturan"):
-        st.caption("Preprocess: resize 128×128, normalisasi 1/255.")
+    
     uploaded = st.file_uploader("Upload gambar (JPG/PNG)", type=["jpg", "jpeg", "png"], key="up_cls")
     if st.button("← Kembali ke Dashboard", type="secondary"):
         go("home")
