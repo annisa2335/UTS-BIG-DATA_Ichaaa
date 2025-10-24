@@ -1,33 +1,43 @@
-# app.py — Combined Dashboard with Lazy Imports (TF & YOLO)
-import streamlit as st
-import numpy as np
-from PIL import Image
-from pathlib import Path
-from io import BytesIO
+import io
 import base64
 import datetime
-import importlib
+from pathlib import Path
+
+import numpy as np
+from PIL import Image
+import streamlit as st
+
+# ------------------ Optional imports with safe fallback ------------------
+_HAS_ULTRA = True
+try:
+    from ultralytics import YOLO
+except Exception as e:
+    _HAS_ULTRA = False
+    _ULTRA_ERR = e
+
+_HAS_TF = True
+try:
+    import tensorflow as tf
+except Exception as e:
+    _HAS_TF = False
+    _TF_ERR = e
 
 # =========================
 # KONFIGURASI HALAMAN
 # =========================
-st.set_page_config(page_title="CV Dashboard: Car/Truck & Face Detection", layout="wide")
+st.set_page_config(page_title="Dual Vision: Detection & Classification", layout="wide")
+st.title("🧠 Dual Vision: Detection & Classification")
 
 # =========================
-# KONSTAN / PATH MODEL
+# KONFIG DEFAULT MODEL
 # =========================
-# Car/Truck (TensorFlow .h5)
-CT_MODEL_PATH = "model/Annisa Humaira_Laporan 2.h5"
-CT_IMG_SIZE = (128, 128)
-
-# Face Detection (YOLO .pt)
-FD_MODEL_PATH = "model/Annisa Humaira_Laporan 4.pt"
-FD_CONF_THRESH = 0.50
-FD_IOU_THRESH  = 0.50
-FD_IMGSZ       = 640
+YOLO_MODEL_PATH = "model/Annisa Humaira_Laporan 4.pt"  # Face Detection (Real/Sketch/Synthetic)
+KERAS_MODEL_PATH = "model/Annisa Humaira_Laporan 2.h5"  # Car vs Truck
+IMG_SIZE = (128, 128)  # untuk classifier
+CLASS_NAMES = ["Not a Car", "A Car"]  # info awal dari kode kamu (tidak dipakai di logika final)
 
 # =========================
-# UTIL: Background per-halaman
+# BACKGROUND (ambil bg.jpeg atau bg.jpg jika ada)
 # =========================
 def get_base64_image(image_path: str) -> str:
     p = Path(image_path)
@@ -36,145 +46,228 @@ def get_base64_image(image_path: str) -> str:
     with open(p, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
 
-def apply_background(img_candidates):
-    """Coba beberapa path gambar; pertama yang ada dipakai sebagai background."""
-    for p in img_candidates:
-        b64 = get_base64_image(p)
-        if b64:
-            st.markdown(
-                f"""
-                <style>
-                .stApp {{
-                    background-image: url("data:image/jpeg;base64,{b64}");
-                    background-size: cover;
-                    background-position: center;
-                    background-repeat: no-repeat;
-                }}
-                .title {{
-                    text-align: center;
-                    font-size: 48px;
-                    font-weight: 800;
-                    color: #f0f0f0;
-                    text-shadow: 0 2px 6px rgba(0,0,0,.35);
-                }}
-                </style>
-                """,
-                unsafe_allow_html=True
-            )
-            return
+bg_img = ""
+for cand in ["bg.jpeg", "bg.jpg"]:
+    bg_img = get_base64_image(cand)
+    if bg_img:
+        break
+
+if bg_img:
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image: url("data:image/jpeg;base64,{bg_img}");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }}
+        .title {{
+            text-align: center;
+            font-size: 44px;
+            font-weight: 800;
+            color: #f0f0f0;
+            text-shadow: 0 2px 6px rgba(0,0,0,.35);
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
 # =========================
-# UTIL: Environment Check (sidebar)
+# HELPERS (Deteksi/YOLO)
 # =========================
-def _can_import(modname):
-    try:
-        importlib.import_module(modname)
-        return True, ""
-    except Exception as e:
-        return False, str(e)
+@st.cache_resource(show_spinner=False)
+def load_yolo_model(path: str):
+    if not _HAS_ULTRA:
+        raise RuntimeError(f"Ultralytics/YOLO belum tersedia: {_ULTRA_ERR}")
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Model YOLO tidak ditemukan: {path}")
+    return YOLO(path)
 
-with st.sidebar.expander("🔧 Environment check"):
-    ok_tf, err_tf     = _can_import("tensorflow")
-    ok_cv2, err_cv2   = _can_import("cv2")
-    ok_torch, err_trc = _can_import("torch")
-    st.write("tensorflow:", "✅ OK" if ok_tf else f"❌ {err_tf[:120]}...")
-    st.write("cv2 (OpenCV):", "✅ OK" if ok_cv2 else f"❌ {err_cv2[:120]}...")
-    st.write("torch:", "✅ OK" if ok_torch else f"❌ {err_trc[:120]}...")
+def get_class_names(model) -> dict:
+    """Map nama asli model ke label Real/Sketch/Synthetic"""
+    raw = model.names if hasattr(model, "names") else {}
+    mapped = {}
+    for cid, name in raw.items():
+        n = str(name).lower().replace("_", " ").strip()
+        if any(k in n for k in ["real", "photo", "natural"]):
+            mapped[cid] = "Real Face"
+        elif any(k in n for k in ["sketch", "draw", "hand", "pencil", "line"]):
+            mapped[cid] = "Sketch Face"
+        elif any(k in n for k in ["synt", "fake", "gen", "ai", "cg", "render"]):
+            mapped[cid] = "Synthetic Face"
+        else:
+            mapped[cid] = name.replace("_", " ").title()
+    return mapped
+
+def draw_and_get_image(result):
+    """Convert hasil YOLO (BGR) ke PIL RGB"""
+    bgr = result.plot()
+    rgb = bgr[:, :, ::-1]
+    return Image.fromarray(rgb)
+
+def summarize_counts(result, names: dict):
+    if result.boxes is None or len(result.boxes) == 0:
+        return []
+    cls_ids = result.boxes.cls.cpu().numpy().astype(int)
+    confs = result.boxes.conf.cpu().numpy()
+    dets = []
+    for cid, conf in zip(cls_ids, confs):
+        dets.append((names.get(cid, str(cid)), float(conf)))
+    return dets
 
 # =========================
-# SIDEBAR MENU
+# HELPERS (Klasifikasi/Keras)
 # =========================
-st.sidebar.title("Menu")
-page = st.sidebar.radio(
-    "Pilih Halaman:",
-    ["Car vs Truck", "Face Detection (Real / Sketch / Synthetic)"],
+@st.cache_resource
+def load_keras_model():
+    if not _HAS_TF:
+        raise RuntimeError(f"TensorFlow/Keras belum tersedia: {_TF_ERR}")
+    p = Path(KERAS_MODEL_PATH)
+    if not p.exists():
+        raise FileNotFoundError(f"Model Keras tidak ditemukan: {KERAS_MODEL_PATH}")
+    return tf.keras.models.load_model(KERAS_MODEL_PATH)
+
+def preprocess_image(img: Image.Image, size=(128, 128)):
+    img = img.convert("RGB").resize(size)
+    x = np.asarray(img).astype("float32") / 255.0
+    return np.expand_dims(x, 0)
+
+def predict_car_truck(img: Image.Image, model):
+    x = preprocess_image(img, size=IMG_SIZE)
+    preds = model.predict(x, verbose=0)
+    p_car = float(preds.ravel()[0])
+
+    # Logika dari kode kamu:
+    # jika p_car >= 0.5 -> Car, else -> Truck (confidence disesuaikan)
+    if p_car >= 0.5:
+        label = "Car"
+        conf = p_car
+    else:
+        label = "Truck"
+        conf = 1.0 - p_car
+
+    return label, conf, p_car
+
+# =========================
+# SIDEBAR
+# =========================
+st.sidebar.header("⚙️ Mode")
+mode = st.sidebar.radio(
+    "Pilih fitur:",
+    ["Face Detection (YOLOv8) — Real/Sketch/Synthetic", "Car vs Truck Classification (Keras)"],
     index=0
 )
 
+st.sidebar.markdown("---")
+st.sidebar.caption("Unggah gambar di panel utama sesuai mode yang dipilih.")
+
 # =========================
-# ========== HALAMAN 1: CAR vs TRUCK (TF) ==========
+# MODE 1: Face Detection (YOLO)
 # =========================
-if page == "Car vs Truck":
-    apply_background(["bg.jpg"])  # background halaman ini
-    st.markdown('<div class="title">Car or Truck Classification</div>', unsafe_allow_html=True)
+if mode.startswith("Face Detection"):
+    st.markdown('<div class="title">Face Detection: Real / Sketch / Synthetic</div>', unsafe_allow_html=True)
+    uploaded = st.file_uploader("Upload an image (JPG/PNG)", type=["jpg", "jpeg", "png"], key="up_det")
 
-    # ---------- Model loader (lazy import TF) ----------
-    @st.cache_resource(show_spinner=False)
-    def load_ct_model(path: str):
-        try:
-            import tensorflow as tf  # lazy import
-        except Exception as e:
-            st.session_state["ct_import_error"] = f"Gagal import TensorFlow: {e}"
-            return None
-        try:
-            model = tf.keras.models.load_model(path)
-            return model
-        except Exception as e:
-            st.session_state["ct_load_error"] = f"Gagal load model .h5: {e}"
-            return None
+    # Param deteksi
+    with st.expander("🔧 Pengaturan Deteksi"):
+        conf_det = st.slider("Confidence", 0.1, 0.95, 0.5, 0.05)
+        iou_det = st.slider("NMS IoU", 0.1, 0.95, 0.5, 0.05)
+        imgsz_det = st.select_slider("Image size (inference)", options=[320, 416, 480, 512, 640, 800, 960], value=640)
+        show_btn = st.checkbox("Tampilkan tombol Download hasil anotasi", value=True)
 
-    # ---------- Preprocess & Predict ----------
-    def ct_preprocess_image(img: Image.Image):
-        img = img.convert("RGB").resize(CT_IMG_SIZE)
-        x = np.asarray(img).astype("float32") / 255.0
-        return np.expand_dims(x, 0)
-
-    def ct_predict(img: Image.Image, model):
-        """
-        Asumsi output model: probabilitas 'Car' pada indeks 0 (sesuai code awal).
-        Jika >= 0.5 -> 'Car', else 'Truck'. Confidence menyesuaikan.
-        """
-        x = ct_preprocess_image(img)
-        preds = model.predict(x, verbose=0)
-        p_car = float(preds.ravel()[0])
-
-        if p_car >= 0.5:
-            label = "Car"
-            conf = p_car
-        else:
-            label = "Truck"
-            conf = 1.0 - p_car
-        return label, conf, p_car
-
-    # ---------- UI ----------
-    uploaded_ct = st.file_uploader(
-        "Upload an image (JPG/PNG) untuk klasifikasi Car/Truck",
-        type=["jpg", "jpeg", "png"],
-        key="ct_uploader"
-    )
-
-    if uploaded_ct:
-        ct_img = Image.open(uploaded_ct)
-
-        col1, col2, col3 = st.columns([1.2, 0.8, 1.2], gap="large")
+    if uploaded:
+        img = Image.open(uploaded).convert("RGB")
+        col1, col2 = st.columns([1.25, 1.0], gap="large")
 
         with col1:
-            st.image(ct_img, use_container_width=True, caption="Uploaded Image")
+            st.image(img, caption="Uploaded Image", use_container_width=True)
+
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Run Detection", use_container_width=True):
+                if not _HAS_ULTRA:
+                    st.error(f"Ultralytics/YOLO belum tersedia. Detail: `{_ULTRA_ERR}`")
+                else:
+                    try:
+                        with st.spinner("Detecting faces..."):
+                            model = load_yolo_model(YOLO_MODEL_PATH)
+                            names = get_class_names(model)
+                            results = model(img, conf=conf_det, iou=iou_det, imgsz=imgsz_det, verbose=False)
+                            result = results[0]
+                            annotated = draw_and_get_image(result)
+                            detections = summarize_counts(result, names)
+                        st.session_state["det_output"] = {"annotated": annotated, "detections": detections}
+                    except Exception as e:
+                        st.error(f"Gagal menjalankan detection: {e}")
+
+    # Hasil Deteksi
+    out = st.session_state.get("det_output")
+    if out:
+        colA, colB = st.columns([1.25, 1.0], gap="large")
+        with colA:
+            st.image(out["annotated"], caption="Detections", use_container_width=True)
+
+            if show_btn:
+                buf = io.BytesIO()
+                out["annotated"].save(buf, format="PNG")
+                filename = f"faces_result_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                st.download_button(
+                    label="⬇️ Download annotated image",
+                    data=buf.getvalue(),
+                    file_name=filename,
+                    mime="image/png",
+                    use_container_width=True
+                )
+
+        with colB:
+            st.markdown("## Detection Result")
+            if out["detections"]:
+                for label, conf in out["detections"]:
+                    st.markdown(f"- **{label}** — Confidence: `{conf:.2f}`")
+            else:
+                st.info("No faces detected.")
+
+# =========================
+# MODE 2: Car vs Truck Classification (Keras)
+# =========================
+else:
+    st.markdown('<div class="title">Car or Truck Classification</div>', unsafe_allow_html=True)
+    uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"], key="up_cls")
+
+    with st.expander("🔧 Pengaturan Klasifikasi"):
+        st.caption("Arsitektur mengikuti kode asli: resize ke 128×128 dan dinormalisasi 1/255.")
+        st.write(f"Model path: `{KERAS_MODEL_PATH}`")
+
+    if uploaded_file:
+        img = Image.open(uploaded_file)
+
+        col1, col2, col3 = st.columns([1.2, 0.8, 1.2], gap="large")
+        with col1:
+            st.image(img, use_container_width=True, caption="Uploaded Image")
 
         with col2:
             st.markdown("<br><br>", unsafe_allow_html=True)
-            if st.button("Run Classification", use_container_width=True, key="ct_run"):
-                with st.spinner("Classifying..."):
-                    ct_model = load_ct_model(CT_MODEL_PATH)
-                    if ct_model is None:
-                        # tampilkan error yang ditangkap
-                        if "ct_import_error" in st.session_state:
-                            st.error(st.session_state["ct_import_error"])
-                        elif "ct_load_error" in st.session_state:
-                            st.error(st.session_state["ct_load_error"])
-                        else:
-                            st.error("Model belum siap. Periksa environment & path model.")
-                        st.stop()
-                    label, conf, raw_car = ct_predict(ct_img, ct_model)
-
-                st.session_state["ct_prediction"] = {
-                    "label": label,
-                    "conf": conf,
-                    "raw_car": raw_car,
-                }
+            if st.button("Run Classification", use_container_width=True):
+                if not _HAS_TF:
+                    st.error(f"TensorFlow/Keras belum tersedia. Detail: `{_TF_ERR}`")
+                else:
+                    try:
+                        with st.spinner("Classifying..."):
+                            model = load_keras_model()
+                            label, conf, raw_car = predict_car_truck(img, model)
+                        st.session_state["prediction"] = {
+                            "label": label,
+                            "conf": conf,
+                            "raw_car": raw_car,
+                        }
+                    except Exception as e:
+                        st.error(f"Gagal menjalankan klasifikasi: {e}")
 
         with col3:
-            pred = st.session_state.get("ct_prediction")
+            pred = st.session_state.get("prediction")
             if pred:
                 st.markdown(
                     f"""
@@ -189,137 +282,14 @@ if page == "Car vs Truck":
                 )
 
 # =========================
-# ========== HALAMAN 2: FACE DETECTION (YOLO) ==========
+# FOOTNOTE
 # =========================
-else:
-    apply_background(["bg2.jpg", "bg.jpeg"])  # background halaman ini
-    st.markdown('<div class="title">Face Detection: Real / Sketch / Synthetic</div>', unsafe_allow_html=True)
-
-    # ---------- Model loader (lazy import Ultralytics) ----------
-    @st.cache_resource(show_spinner=False)
-    def load_fd_model(path: str):
-        try:
-            from ultralytics import YOLO  # lazy import
-        except Exception as e:
-            st.session_state["fd_import_error"] = f"Gagal import Ultralytics/YOLO: {e}"
-            return None
-        try:
-            return YOLO(path)
-        except Exception as e:
-            st.session_state["fd_load_error"] = f"Gagal load model .pt: {e}"
-            return None
-
-    def fd_map_class_names(model) -> dict:
+with st.expander("ℹ️ Tips & Catatan"):
+    st.markdown(
         """
-        Samakan nama kelas berdasarkan kata kunci:
-        Real Face / Sketch Face / Synthetic Face
+- **YOLOv8 (.pt)**: pastikan versi `ultralytics` match dengan saat training model.
+- **Keras (.h5)**: app memetakan probabilitas output tunggal ke `Car` jika ≥ 0.5, selain itu `Truck`.
+- Background akan memakai `bg.jpeg` jika ada; jika tidak ada akan coba `bg.jpg`.
+- Jika ada error modul, jalankan `pip install` seperti baris petunjuk di atas.
         """
-        raw = model.names if hasattr(model, "names") else {}
-        mapped = {}
-        for cid, name in raw.items():
-            n = str(name).lower().replace("_", " ").strip()
-            if any(k in n for k in ["real", "photo", "natural"]):
-                mapped[cid] = "Real Face"
-            elif any(k in n for k in ["sketch", "draw", "hand", "pencil", "line"]):
-                mapped[cid] = "Sketch Face"
-            elif any(k in n for k in ["synt", "fake", "gen", "ai", "cg", "render"]):
-                mapped[cid] = "Synthetic Face"
-            else:
-                mapped[cid] = name.replace("_", " ").title()
-        return mapped
-
-    def fd_annotate_image(result):
-        """Kembalikan PIL image beranotasi dari result YOLO."""
-        bgr = result.plot()  # ndarray BGR
-        rgb = bgr[:, :, ::-1]
-        return Image.fromarray(rgb)
-
-    def fd_top_detection(result, names: dict):
-        """
-        Ambil 1 deteksi dengan confidence tertinggi.
-        Return (label, conf) atau (None, None) jika tidak ada.
-        """
-        if result.boxes is None or len(result.boxes) == 0:
-            return None, None
-        confs = result.boxes.conf.cpu().numpy()
-        clses = result.boxes.cls.cpu().numpy().astype(int)
-        idx = int(np.argmax(confs))
-        label = names.get(clses[idx], str(clses[idx]))
-        conf = float(confs[idx])
-        return label, conf
-
-    # ---------- UI ----------
-    uploaded_fd = st.file_uploader(
-        "Upload an image (JPG/PNG) untuk Face Detection",
-        type=["jpg", "jpeg", "png"],
-        key="fd_uploader"
     )
-
-    if uploaded_fd:
-        fd_img = Image.open(uploaded_fd).convert("RGB")
-
-        col1, col2, col3 = st.columns([1.2, 0.9, 1.2], gap="large")
-
-        # kiri: tampilkan gambar
-        with col1:
-            st.image(fd_img, caption="Uploaded Image", use_container_width=True)
-
-        # tengah: tombol Run
-        with col2:
-            st.markdown("<br><br>", unsafe_allow_html=True)
-            if st.button("Run Classification", use_container_width=True, key="fd_run"):
-                with st.spinner("Detecting..."):
-                    fd_model = load_fd_model(FD_MODEL_PATH)
-                    if fd_model is None:
-                        if "fd_import_error" in st.session_state:
-                            st.error(st.session_state["fd_import_error"])
-                        elif "fd_load_error" in st.session_state:
-                            st.error(st.session_state["fd_load_error"])
-                        else:
-                            st.error("Model YOLO belum siap. Periksa environment & path model.")
-                        st.stop()
-
-                    names = fd_map_class_names(fd_model)
-                    results = fd_model(
-                        fd_img, conf=FD_CONF_THRESH, iou=FD_IOU_THRESH,
-                        imgsz=FD_IMGSZ, verbose=False
-                    )
-                    result = results[0]
-
-                    pred_label, pred_conf = fd_top_detection(result, names)
-                    annotated = fd_annotate_image(result)
-
-                st.session_state["fd_pred"] = {
-                    "label": pred_label,
-                    "conf": pred_conf,
-                    "annotated": annotated
-                }
-
-        # kanan: hasil + tombol download
-        with col3:
-            pred = st.session_state.get("fd_pred")
-            st.markdown("<br><br>", unsafe_allow_html=True)
-            if pred:
-                if pred["label"] is not None:
-                    st.markdown(
-                        f"""
-                        <h2>Prediction: <span style="background:#e6f4ea;border-radius:8px;padding:4px 10px;">
-                        {pred['label']}</span></h2>
-                        <h3>Confidence: <span style="background:#e6f4ea;border-radius:8px;padding:2px 8px;">
-                        {pred['conf']:.2f}</span></h3>
-                        """,
-                        unsafe_allow_html=True
-                    )
-                else:
-                    st.warning("No faces detected.")
-
-                if pred.get("annotated") is not None:
-                    buf = BytesIO()
-                    pred["annotated"].save(buf, format="PNG")
-                    st.download_button(
-                        label="⬇️ Download Detection Result",
-                        data=buf.getvalue(),
-                        file_name=f"faces_result_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                        mime="image/png",
-                        use_container_width=True
-                    )
