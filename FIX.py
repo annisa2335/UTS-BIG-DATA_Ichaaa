@@ -236,16 +236,6 @@ def page_home():
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.write("")
-    with st.expander("ℹ️ Tips"):
-        st.markdown(
-            """
-            - Pastikan file model berada di path default:  
-              • YOLO: `model/Annisa Humaira_Laporan 4.pt`  
-              • Keras: `model/Annisa Humaira_Laporan 2.h5`  
-            - Kamu bisa mengganti file model tersebut sesuai kebutuhan.
-            - Gambar terbaik: JPG/PNG dengan kualitas jelas dan ukuran tidak terlalu kecil.
-            """
-        )
 
 # ========== DETECTION ==========
 def page_detect():
