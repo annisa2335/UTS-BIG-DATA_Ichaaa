@@ -1,10 +1,7 @@
-# app_ui_minimal.py
+# app_ui_minimal.py (versi update dengan ukuran gambar lebih kecil)
 # =========================================================
 # Streamlit App (UI minimal, no Settings panel)
-# - Landing Page -> (Face Detection | Car/Truck Classification) + About & Help
-# - Gambar selalu ditampilkan sebelum proses
-# =========================================================
-# pip install streamlit ultralytics tensorflow pillow numpy opencv-python
+# Upload → Preview (ukuran sedang) → Jalankan Deteksi/Klasifikasi
 # =========================================================
 import io
 import time
@@ -48,6 +45,10 @@ if "prediction" not in st.session_state:
 YOLO_MODEL_PATH = "model/Annisa Humaira_Laporan 4.pt"   # Face Detection (Real/Sketch/Synthetic)
 KERAS_MODEL_PATH = "model/Annisa Humaira_Laporan 2.h5"  # Car vs Truck
 IMG_SIZE = (128, 128)                                   # classifier input
+
+# --- UI sizes (px) ---
+PREVIEW_WIDTH = 480   # ukuran tampilan pratinjau gambar
+OUTPUT_WIDTH  = 640   # ukuran tampilan hasil anotasi/deteksi
 
 # Default parameter (tanpa panel pengaturan)
 YOLO_DEFAULT_CONF = 0.5
@@ -102,11 +103,6 @@ st.markdown(
     }}
     .hero h1 {{ margin: 0 0 8px 0; font-size: 46px; font-weight: 800; }}
     .hero p  {{ margin: 0; font-size: 16px; opacity: .98; }}
-    .chip {{
-        display:inline-block; padding:7px 12px; border-radius:999px;
-        background:#F3F4F6; color:#374151; font-weight:600; font-size:12px;
-        margin-right:6px;
-    }}
     .card {{
         background: rgba(255,255,255,.96);
         border-radius: 18px;
@@ -115,7 +111,6 @@ st.markdown(
         transition: transform .15s ease, box-shadow .15s ease;
         height: 100%;
     }}
-    .card:hover {{ transform: translateY(-2px); box-shadow: 0 14px 30px rgba(0,0,0,.16); }}
     .muted {{ color:{TEXT_MUTED}; font-size:14px; }}
     .footer {{ color:{TEXT_MUTED}; font-size:12px; text-align:center; margin-top:36px; }}
     </style>
@@ -190,7 +185,7 @@ def predict_car_truck(img: Image.Image, model):
     return label, conf, p_car
 
 # =========================
-# NAVBAR (Streamlit native)
+# NAVBAR
 # =========================
 def navbar():
     tabs = ["🏠 Home", "🧭 Detect", "🏷️ Classify", "ℹ️ About", "❓ Help"]
@@ -207,267 +202,104 @@ def page_home():
     st.markdown(
         """
         <div class="hero">
-          <div class="chip">🚀 Dual Vision Dashboard</div>
-          <h1>Deteksi Objek & Klasifikasi Gambar</h1>
-          <p>Tanpa panel pengaturan. Upload ➜ lihat pratinjau ➜ jalankan.</p>
+          <h1>Dual Vision Dashboard</h1>
+          <p>Deteksi wajah & klasifikasi kendaraan — cepat, ringan, dan mudah.</p>
         </div>
         """,
         unsafe_allow_html=True
     )
     st.write("")
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(
-            """
-            <div class="card">
-              <h3>🧭 Face Detection</h3>
-              <p class="muted">Deteksi wajah (Real / Sketch / Synthetic) dengan YOLOv8 (.pt). 
-              Hasil anotasi siap diunduh.</p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        if st.button("Mulai Deteksi", use_container_width=True, key="home_detect"):
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("<div class='card'><h3>🧭 Face Detection</h3><p class='muted'>Deteksi wajah (Real/Sketch/Synthetic).</p></div>", unsafe_allow_html=True)
+        if st.button("Mulai Deteksi", use_container_width=True):
             st.session_state.page = "detect"
-    with c2:
-        st.markdown(
-            """
-            <div class="card">
-              <h3>🏷️ Car vs Truck</h3>
-              <p class="muted">Klasifikasi kendaraan (Keras .h5). Tampilkan label & confidence.</p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        if st.button("Mulai Klasifikasi", use_container_width=True, key="home_classify"):
+    with col2:
+        st.markdown("<div class='card'><h3>🏷️ Car vs Truck</h3><p class='muted'>Klasifikasi kendaraan (Car atau Truck).</p></div>", unsafe_allow_html=True)
+        if st.button("Mulai Klasifikasi", use_container_width=True):
             st.session_state.page = "classify"
 
 def page_detect():
-    st.markdown('<div class="glass">', unsafe_allow_html=True)
     st.markdown("### 🧭 Face Detection — Real / Sketch / Synthetic")
-    st.caption(f"Model: `{YOLO_MODEL_PATH}`")
-
     uploaded = st.file_uploader("📤 Upload gambar (JPG/PNG)", type=["jpg", "jpeg", "png"], key="up_det")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Selalu tampilkan pratinjau gambar sebelum deteksi
-    st.markdown('<div class="glass">', unsafe_allow_html=True)
     if uploaded:
         img_preview = Image.open(uploaded).convert("RGB")
-        st.image(img_preview, caption="Pratinjau Gambar", use_container_width=True)
+        st.image(img_preview, caption="Pratinjau Gambar", width=PREVIEW_WIDTH, use_container_width=False)
     else:
         st.info("Upload gambar untuk memulai deteksi.")
-    st.markdown('</div>', unsafe_allow_html=True)
+        return
 
-    st.markdown('<div class="glass">', unsafe_allow_html=True)
-    colGo, colBack = st.columns([0.7, 0.3])
-    with colGo:
-        run = st.button("🔎 Jalankan Deteksi", use_container_width=True, type="primary", disabled=uploaded is None)
-    with colBack:
-        back = st.button("🏠 Kembali ke Home", use_container_width=True)
-    if back:
-        st.session_state.page = "home"
-
-    if uploaded and run:
-        if not _HAS_ULTRA:
-            st.error(f"Ultralytics/YOLO belum tersedia. Detail: `{_ULTRA_ERR}`")
-        else:
-            try:
-                start = time.time()
-                with st.spinner("Detecting faces..."):
-                    model = load_yolo_model(YOLO_MODEL_PATH)
-                    names = get_class_names(model)
-                    results = model(
-                        img_preview,
-                        conf=YOLO_DEFAULT_CONF,
-                        iou=YOLO_DEFAULT_IOU,
-                        imgsz=YOLO_INFER_SIZE,
-                        verbose=False
-                    )
-                    result = results[0]
-                    annotated = draw_and_get_image(result)
-                    detections = summarize_counts(result, names)
-                elapsed = time.time() - start
-                st.session_state.det_output = {"annotated": annotated, "detections": detections, "elapsed": elapsed}
-            except Exception as e:
-                st.error(f"Gagal menjalankan detection: {e}")
+    run = st.button("🔎 Jalankan Deteksi", use_container_width=True)
+    if run:
+        try:
+            start = time.time()
+            with st.spinner("Detecting faces..."):
+                model = load_yolo_model(YOLO_MODEL_PATH)
+                names = get_class_names(model)
+                results = model(img_preview, conf=YOLO_DEFAULT_CONF, iou=YOLO_DEFAULT_IOU, imgsz=YOLO_INFER_SIZE)
+                result = results[0]
+                annotated = draw_and_get_image(result)
+                detections = summarize_counts(result, names)
+            elapsed = time.time() - start
+            st.session_state.det_output = {"annotated": annotated, "detections": detections, "elapsed": elapsed}
+        except Exception as e:
+            st.error(f"Error: {e}")
 
     out = st.session_state.det_output
     if out:
-        st.markdown('<div class="glass">', unsafe_allow_html=True)
-        st.markdown("#### 📊 Hasil Deteksi")
-        c1, c2 = st.columns([1.25, 1.0], gap="large")
-        with c1:
-            st.image(out["annotated"], caption="🖼️ Detections", use_container_width=True)
-            if SHOW_DOWNLOAD_BTN:
-                buf = io.BytesIO()
-                out["annotated"].save(buf, format="PNG")
-                filename = f"faces_result_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                st.download_button("⬇️ Download annotated image", buf.getvalue(), file_name=filename, mime="image/png", use_container_width=True)
-        with c2:
-            count = len(out["detections"]) if out["detections"] else 0
-            mcol = st.columns(3)
-            mcol[0].metric("Detections", count)
-            mcol[1].metric("ImgSize", YOLO_INFER_SIZE)
-            mcol[2].metric("Latency (s)", f"{out['elapsed']:.2f}")
-            st.write("")
-            st.markdown("#### 🔖 Detail")
-            if out["detections"]:
-                for i, (label, conf) in enumerate(out["detections"], start=1):
-                    st.markdown(f"{i}. **{label}** — `{conf:.2f}`")
-            else:
-                st.info("Tidak ada wajah terdeteksi.")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.image(out["annotated"], caption="🖼️ Detections", width=OUTPUT_WIDTH, use_container_width=False)
+        if SHOW_DOWNLOAD_BTN:
+            buf = io.BytesIO()
+            out["annotated"].save(buf, format="PNG")
+            filename = f"faces_result_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            st.download_button("⬇️ Download annotated image", buf.getvalue(), file_name=filename, mime="image/png")
+        if out["detections"]:
+            st.markdown("#### 📊 Hasil Deteksi")
+            for label, conf in out["detections"]:
+                st.markdown(f"- **{label}** — `{conf:.2f}`")
+        else:
+            st.info("Tidak ada wajah terdeteksi.")
 
 def page_classify():
-    st.markdown('<div class="glass">', unsafe_allow_html=True)
     st.markdown("### 🏷️ Car vs Truck Classification")
-    st.caption(f"Model: `{KERAS_MODEL_PATH}`")
     uploaded = st.file_uploader("📤 Upload gambar (JPG/PNG)", type=["jpg", "jpeg", "png"], key="up_cls")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Selalu tampilkan pratinjau gambar sebelum klasifikasi
-    st.markdown('<div class="glass">', unsafe_allow_html=True)
     if uploaded:
         img_preview = Image.open(uploaded)
-        st.image(img_preview, caption="Pratinjau Gambar", use_container_width=True)
+        st.image(img_preview, caption="Pratinjau Gambar", width=PREVIEW_WIDTH, use_container_width=False)
     else:
         st.info("Upload gambar untuk memulai klasifikasi.")
-    st.markdown('</div>', unsafe_allow_html=True)
+        return
 
-    st.markdown('<div class="glass">', unsafe_allow_html=True)
-    colGo, colBack = st.columns([0.7, 0.3])
-    with colGo:
-        run = st.button("🧠 Jalankan Klasifikasi", use_container_width=True, type="primary", disabled=uploaded is None)
-    with colBack:
-        back = st.button("🏠 Kembali ke Home", use_container_width=True)
-    if back:
-        st.session_state.page = "home"
-
-    if uploaded and run:
-        if not _HAS_TF:
-            st.error(f"TensorFlow/Keras belum tersedia. Detail: `{_TF_ERR}`")
-        else:
-            try:
-                start = time.time()
-                with st.spinner("Classifying..."):
-                    model = load_keras_model()
-                    label, conf, raw_car = predict_car_truck(img_preview, model)
-                elapsed = time.time() - start
-                st.session_state.prediction = {"label": label, "conf": conf, "raw_car": raw_car, "elapsed": elapsed}
-            except Exception as e:
-                st.error(f"Gagal menjalankan klasifikasi: {e}")
+    run = st.button("🧠 Jalankan Klasifikasi", use_container_width=True)
+    if run:
+        try:
+            start = time.time()
+            with st.spinner("Classifying..."):
+                model = load_keras_model()
+                label, conf, raw_car = predict_car_truck(img_preview, model)
+            elapsed = time.time() - start
+            st.session_state.prediction = {"label": label, "conf": conf, "raw_car": raw_car, "elapsed": elapsed}
+        except Exception as e:
+            st.error(f"Error: {e}")
 
     pred = st.session_state.prediction
     if pred:
-        st.markdown('<div class="glass">', unsafe_allow_html=True)
-        st.markdown("#### 📊 Hasil Klasifikasi")
-        c1, c2 = st.columns([1.2, 1.0], gap="large")
-        with c1:
-            st.markdown(
-                f"""
-                <div class="card">
-                  <h3>🎯 Prediction: <code>{pred['label']}</code></h3>
-                  <h4>Confidence: <code>{pred['conf']:.2f}</code></h4>
-                  <p class="muted">Raw probability for <b>Car</b> = {pred['raw_car']:.2f}</p>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        with c2:
-            mcol = st.columns(3)
-            mcol[0].metric("Is Car?", f"{pred['raw_car']:.2f}")
-            mcol[1].metric("Is Truck?", f"{1.0 - pred['raw_car']:.2f}")
-            mcol[2].metric("Latency (s)", f"{pred['elapsed']:.2f}")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.image(img_preview, caption=f"Predicted: {pred['label']} ({pred['conf']:.2f})", width=OUTPUT_WIDTH, use_container_width=False)
+        st.markdown(f"**Confidence:** {pred['conf']:.2f}")
+        st.markdown(f"**Raw prob (Car):** {pred['raw_car']:.2f}")
+        st.caption(f"Latency: {pred['elapsed']:.2f}s")
 
 def page_about():
-    st.markdown(
-        """
-        <div class="hero">
-          <div class="chip">ℹ️ About</div>
-          <h1>Tentang Aplikasi</h1>
-          <p>Aplikasi ini terdiri dari dua fitur utama: <b>Face Detection</b> dan
-             <b>Car vs Truck Classification</b>. Dirancang untuk demo cepat, praktikum, dan eksplorasi.</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    st.write("")
-    st.markdown(
-        f"""
-        <div class="card">
-          <h3>🔧 Teknologi</h3>
-          <ul>
-            <li>Ultralytics YOLOv8 (.pt) — Object/Face Detection</li>
-            <li>TensorFlow/Keras (.h5) — Image Classification</li>
-            <li>Streamlit — UI cepat dan ringan</li>
-          </ul>
-          <h3>📁 Struktur Model</h3>
-          <ul>
-            <li>YOLO path: <code>{YOLO_MODEL_PATH}</code></li>
-            <li>Keras path: <code>{KERAS_MODEL_PATH}</code></li>
-          </ul>
-          <h3>🧪 Saran Pengujian</h3>
-          <ul>
-            <li>Pakai gambar dengan objek jelas & resolusi memadai.</li>
-            <li>Hindari kompresi berlebihan atau noise tinggi.</li>
-            <li>Uji variasi pose/pencahayaan untuk deteksi wajah.</li>
-          </ul>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    st.markdown("### ℹ️ Tentang Aplikasi")
+    st.info("Aplikasi sederhana untuk deteksi wajah (YOLOv8) dan klasifikasi kendaraan (Keras).")
 
 def page_help():
-    st.markdown(
-        """
-        <div class="hero">
-          <div class="chip">❓ Help</div>
-          <h1>Panduan Singkat</h1>
-          <p>Ikuti langkah-langkah untuk memakai fitur yang kamu butuhkan.</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    st.write("")
-    st.markdown(
-        """
-        <div class="card">
-          <h3>🧭 Deteksi Wajah</h3>
-          <ol>
-            <li>Masuk ke halaman <b>Detect</b>.</li>
-            <li>Upload gambar (JPG/PNG) ➜ pratinjau muncul.</li>
-            <li>Klik <b>Jalankan Deteksi</b> untuk melihat hasil.</li>
-          </ol>
-          <h3>🏷️ Klasifikasi Kendaraan</h3>
-          <ol>
-            <li>Masuk ke halaman <b>Classify</b>.</li>
-            <li>Upload gambar (JPG/PNG) ➜ pratinjau muncul.</li>
-            <li>Klik <b>Jalankan Klasifikasi</b> untuk melihat hasil.</li>
-          </ol>
-          <h3>🛠️ Troubleshooting</h3>
-          <ul>
-            <li><b>Model tidak ditemukan:</b> pastikan file ada di path yang benar.</li>
-            <li><b>ModuleNotFoundError:</b> jalankan <code>pip install streamlit ultralytics tensorflow pillow numpy opencv-python</code>.</li>
-            <li><b>Gambar tidak muncul:</b> pastikan format JPG/PNG dan file tidak corrupt.</li>
-          </ul>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    st.markdown("### ❓ Panduan Penggunaan")
+    st.markdown("1️⃣ Masuk ke halaman **Detect** atau **Classify**.\n\n2️⃣ Upload gambar (JPG/PNG).\n\n3️⃣ Klik tombol proses.\n\n4️⃣ Lihat hasil & confidence.")
 
 # =========================
 # RENDER
 # =========================
-def navbar():
-    tabs = ["🏠 Home", "🧭 Detect", "🏷️ Classify", "ℹ️ About", "❓ Help"]
-    ids  = ["home", "detect", "classify", "about", "help"]
-    idx_default = ids.index(st.session_state.page) if st.session_state.page in ids else 0
-    choice = st.radio("Navigation", tabs, horizontal=True, index=idx_default, label_visibility="collapsed")
-    mapping = dict(zip(tabs, ids))
-    st.session_state.page = mapping[choice]
-
 navbar()
 
 page = st.session_state.page
