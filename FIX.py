@@ -199,7 +199,7 @@ def page_home():
     st.markdown(
         """
         <div class="hero">
-            <h1>Dual Vision Dashboard</h1>
+            <h1>Dashboard ...</h1>
             <p>Dashboard untuk <b>Deteksi Objek</b> dan <b>Klasifikasi Gambar</b>.
                Aplikasi ini dirancang ringan, cepat, dan mudah dipakai. Pilih mode yang kamu butuhkan </p>
         </div>
