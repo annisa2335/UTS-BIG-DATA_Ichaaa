@@ -1,6 +1,6 @@
 # app_ui_plus.py
 # =========================================================
-# Streamlit App (UI enhanced):
+# Streamlit App (UI enhanced, no-JS):
 # Landing Page -> (Face Detection | Car/Truck Classification) + About & Help
 # =========================================================
 # pip install streamlit ultralytics tensorflow pillow numpy opencv-python
@@ -121,20 +121,9 @@ st.markdown(
         background:{PRIMARY}; color:#fff;
     }}
     .btn-primary:hover {{ background:{PRIMARY_DARK}; }}
-    .btn-ghost {{
-        background:transparent; color:{PRIMARY}; border:2px solid {PRIMARY}; 
-    }}
-    .btn-ghost:hover {{ color:#fff; background:{PRIMARY}; }}
     .btn-cta {{
         background:linear-gradient(135deg,{PRIMARY},{ACCENT}); color:#fff;
     }}
-    /* top mini navbar */
-    .navwrap {{ margin-bottom: 8px; }}
-    .navbtn {{
-        padding:8px 14px; border-radius:10px; border:1px solid #e5e7eb;
-        background:#fff; color:#111827; font-weight:700; margin-right:6px;
-    }}
-    .navbtn.active {{ background:{PRIMARY}; border-color:{PRIMARY}; color:#fff; }}
     .footer {{ color:{TEXT_MUTED}; font-size:12px; text-align:center; margin-top:36px; }}
     </style>
     """,
@@ -208,54 +197,16 @@ def predict_car_truck(img: Image.Image, model):
     return label, conf, p_car
 
 # =========================
-# ROUTING
-# =========================
-def go(page_name: str):
-    st.session_state.page = page_name
-    # reset output saat berpindah halaman
-    if page_name != "detect":
-        st.session_state.det_output = None
-    if page_name != "classify":
-        st.session_state.prediction = None
-
-# =========================
-# MINI NAVBAR (TOP)
+# NAVBAR (Streamlit native)
 # =========================
 def navbar():
-    st.markdown('<div class="glass navwrap">', unsafe_allow_html=True)
-    colA, colB = st.columns([0.7, 0.3])
-    with colA:
-        cols = st.columns(5)
-        pages = [("home", "🏠 Home"), ("detect", "🧭 Detect"), ("classify", "🏷️ Classify"),
-                 ("about", "ℹ️ About"), ("help", "❓ Help")]
-        for i, (pid, label) in enumerate(pages):
-            active = "active" if st.session_state.page == pid else ""
-            html = f'<button class="navbtn {active}" onclick="window.parent.postMessage({{type: \'streamlit:setComponentValue\', value: \'{pid}\' }}, \'*\')">{label}</button>'
-            with cols[i]:
-                st.markdown(html, unsafe_allow_html=True)
-    with colB:
-        st.write("")  # area kosong untuk masa depan (theme switcher, dsb.)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# JS listener untuk tombol navbar (mengubah session_state via query params)
-st.components.v1.html("""
-<script>
-window.addEventListener("message", (event) => {
-  if (event.data?.type === "streamlit:setComponentValue") {
-    const pid = event.data.value;
-    const hash = window.location.hash.split("?")[0];
-    const url = hash + "?page=" + pid;
-    window.location.hash = url;
-    window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:rerun"}, "*");
-  }
-}, false);
-</script>
-""", height=0)
-
-# Sync page from query param (optional, deep-link support)
-query_params = st.query_params
-if "page" in query_params and query_params["page"] != st.session_state.page:
-    st.session_state.page = query_params["page"]
+    tabs = ["🏠 Home", "🧭 Detect", "🏷️ Classify", "ℹ️ About", "❓ Help"]
+    ids  = ["home", "detect", "classify", "about", "help"]
+    # Tentukan index default sesuai page state
+    idx_default = ids.index(st.session_state.page) if st.session_state.page in ids else 0
+    choice = st.radio("Navigation", tabs, horizontal=True, index=idx_default, label_visibility="collapsed")
+    mapping = dict(zip(tabs, ids))
+    st.session_state.page = mapping[choice]
 
 # =========================
 # PAGES
@@ -275,27 +226,30 @@ def page_home():
     c1, c2 = st.columns(2)
     with c1:
         st.markdown(
-            f"""
+            """
             <div class="card">
               <h3>🧭 Face Detection</h3>
-              <p class="muted">Deteksi wajah & klas-nya (Real / Sketch / Synthetic) dengan model YOLOv8 (.pt). 
+              <p class="muted">Deteksi wajah & kelasnya (Real / Sketch / Synthetic) dengan model YOLOv8 (.pt). 
               Hasil anotasi siap diunduh.</p>
-              <a class="btn btn-primary" href="#?page=detect">Mulai Deteksi</a>
-            </div>
             """,
             unsafe_allow_html=True
         )
+        if st.button("Mulai Deteksi", use_container_width=True, key="home_detect"):
+            st.session_state.page = "detect"
+        st.markdown("</div>", unsafe_allow_html=True)
     with c2:
         st.markdown(
-            f"""
+            """
             <div class="card">
               <h3>🏷️ Car vs Truck</h3>
               <p class="muted">Klasifikasi kendaraan dengan model Keras (.h5) — tampilkan label, confidence, dan probabilitas.</p>
-              <a class="btn btn-cta" href="#?page=classify">Mulai Klasifikasi</a>
-            </div>
             """,
             unsafe_allow_html=True
         )
+        if st.button("Mulai Klasifikasi", use_container_width=True, key="home_classify"):
+            st.session_state.page = "classify"
+        st.markdown("</div>", unsafe_allow_html=True)
+
     st.write("")
     with st.expander("✨ Tips Cepat"):
         st.markdown(
@@ -314,10 +268,10 @@ def page_detect():
     st.caption(f"Model: `{YOLO_MODEL_PATH}`")
 
     with st.expander("⚙️ Pengaturan"):
-        conf_det = st.slider("Confidence", 0.1, 0.95, 0.5, 0.05, key="conf_det")
-        iou_det = st.slider("NMS IoU", 0.1, 0.95, 0.5, 0.05, key="iou_det")
-        imgsz_det = st.select_slider("Image size (inference)", options=[320, 416, 480, 512, 640, 800, 960], value=640, key="imgsz_det")
-        show_btn = st.checkbox("Tampilkan tombol Download hasil anotasi", value=True, key="show_dl")
+        st.slider("Confidence", 0.1, 0.95, 0.5, 0.05, key="conf_det")
+        st.slider("NMS IoU", 0.1, 0.95, 0.5, 0.05, key="iou_det")
+        st.select_slider("Image size (inference)", options=[320, 416, 480, 512, 640, 800, 960], value=640, key="imgsz_det")
+        st.checkbox("Tampilkan tombol Download hasil anotasi", value=True, key="show_dl")
 
     uploaded = st.file_uploader("📤 Upload gambar (JPG/PNG)", type=["jpg", "jpeg", "png"], key="up_det")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -329,7 +283,7 @@ def page_detect():
     with colBack:
         back = st.button("🏠 Kembali ke Home", use_container_width=True)
     if back:
-        go("home")
+        st.session_state.page = "home"
 
     if uploaded and run:
         if not _HAS_ULTRA:
@@ -396,7 +350,7 @@ def page_classify():
     with colBack:
         back = st.button("🏠 Kembali ke Home", use_container_width=True)
     if back:
-        go("home")
+        st.session_state.page = "home"
 
     if uploaded and run:
         if not _HAS_TF:
@@ -466,7 +420,7 @@ def page_about():
           <ul>
             <li>Pakai gambar dengan objek jelas & resolusi memadai.</li>
             <li>Hindari kompresi berlebihan atau noise tinggi.</li>
-            <li>Uji beberapa variasi pose/pencahayaan untuk deteksi wajah.</li>
+            <li>Uji variasi pose/pencahayaan untuk deteksi wajah.</li>
           </ul>
         </div>
         """,
