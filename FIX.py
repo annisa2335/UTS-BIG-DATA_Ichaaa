@@ -58,7 +58,7 @@ def get_base64_image(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 bg_img = ""
-for cand in ["bg.jpeg", "bg.jpg"]:
+for cand in ["bg.jpg"]:
     bg_img = get_base64_image(cand)
     if bg_img:
         break
