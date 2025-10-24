@@ -1,10 +1,3 @@
-# app_ui_plus.py
-# =========================================================
-# Streamlit App (UI enhanced, no-JS):
-# Landing Page -> (Face Detection | Car/Truck Classification) + About & Help
-# =========================================================
-# pip install streamlit ultralytics tensorflow pillow numpy opencv-python
-# =========================================================
 import io
 import time
 import base64
@@ -33,7 +26,7 @@ except Exception as e:
 # =========================
 # KONFIG & STATE
 # =========================
-st.set_page_config(page_title="Dual Vision Dashboard", layout="wide", page_icon="🪄")
+st.set_page_config(page_title="Dashboard_Annisa", layout="wide", page_icon="🪄")
 if "page" not in st.session_state:
     st.session_state.page = "home"  # home | detect | classify | about | help
 if "det_output" not in st.session_state:
@@ -60,7 +53,7 @@ def get_base64_image(image_path: str) -> str:
 
 # coba bg custom kalau ada
 bg_img = ""
-for cand in ["bg.jpeg", "bg.jpg"]:
+for cand in ["bg.jpg"]:
     bg_img = get_base64_image(cand)
     if bg_img:
         break
@@ -217,7 +210,7 @@ def page_home():
         <div class="hero">
           <div class="chip">🚀 Dual Vision Dashboard</div>
           <h1>Deteksi Objek & Klasifikasi Gambar</h1>
-          <p>Ringan, cepat, dan easy-to-use. Pilih fitur yang kamu perlu — semua dalam satu aplikasi.</p>
+          <p>Pilih fitur yang kamu perlu.</p>
         </div>
         """,
         unsafe_allow_html=True
@@ -229,7 +222,7 @@ def page_home():
             """
             <div class="card">
               <h3>🧭 Face Detection</h3>
-              <p class="muted">Deteksi wajah & kelasnya (Real / Sketch / Synthetic) dengan model YOLOv8 (.pt). 
+              <p class="muted">Deteksi wajah (Real / Sketch / Synthetic). 
               Hasil anotasi siap diunduh.</p>
             """,
             unsafe_allow_html=True
@@ -242,7 +235,7 @@ def page_home():
             """
             <div class="card">
               <h3>🏷️ Car vs Truck</h3>
-              <p class="muted">Klasifikasi kendaraan dengan model Keras (.h5) — tampilkan label, confidence, dan probabilitas.</p>
+              <p class="muted">Klasifikasi kendaraan.</p>
             """,
             unsafe_allow_html=True
         )
@@ -250,17 +243,6 @@ def page_home():
             st.session_state.page = "classify"
         st.markdown("</div>", unsafe_allow_html=True)
 
-    st.write("")
-    with st.expander("✨ Tips Cepat"):
-        st.markdown(
-            """
-            - Path default model:  
-              • YOLO: `model/Annisa Humaira_Laporan 4.pt`  
-              • Keras: `model/Annisa Humaira_Laporan 2.h5`  
-            - Gambar terbaik: resolusi cukup, objek jelas, noise minimal.
-            - Kamu bisa ganti model dengan menimpa file di folder `model/`.
-            """
-        )
 
 def page_detect():
     st.markdown('<div class="glass">', unsafe_allow_html=True)
@@ -395,8 +377,8 @@ def page_about():
         <div class="hero">
           <div class="chip">ℹ️ About</div>
           <h1>Tentang Aplikasi</h1>
-          <p>Aplikasi ini menggabungkan dua fitur utama: <b>Face Detection (YOLOv8)</b> dan
-             <b>Car vs Truck Classification (Keras)</b>. Dirancang untuk demo cepat, praktikum, dan eksplorasi.</p>
+          <p>Aplikasi ini tersedia dua fitur utama: <b>Face Detection</b> dan
+             <b>Car vs Truck Classification</b>. Dirancang untuk demo cepat, praktikum, dan eksplorasi.</p>
         </div>
         """,
         unsafe_allow_html=True
