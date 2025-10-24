@@ -1,10 +1,3 @@
-# app_ui.py
-# =========================================================
-# Streamlit App (UI revamped):
-# Landing Page -> Pilih Fitur -> (Face Detection | Car/Truck Classification)
-# =========================================================
-# pip install streamlit ultralytics tensorflow pillow numpy opencv-python
-# =========================================================
 import io
 import base64
 import datetime
