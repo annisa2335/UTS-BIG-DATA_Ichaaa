@@ -23,25 +23,21 @@ except Exception as e:
     _TF_ERR = e
 
 # =========================
-# KONFIG & STATE
+# KONFIGURASI HALAMAN
 # =========================
-st.set_page_config(page_title="Dashboard ...", layout="wide")
-if "page" not in st.session_state:
-    st.session_state.page = "home"  # home | detect | classify
-if "det_output" not in st.session_state:
-    st.session_state.det_output = None
-if "prediction" not in st.session_state:
-    st.session_state.prediction = None
+st.set_page_config(page_title="Dual Vision: Detection & Classification", layout="wide")
+st.title("🧠 Dual Vision: Detection & Classification")
 
 # =========================
-# MODEL PATH & PARAM
+# KONFIG DEFAULT MODEL
 # =========================
-YOLO_MODEL_PATH = "model/Annisa Humaira_Laporan 4.pt"   # Face Detection (Real/Sketch/Synthetic)
+YOLO_MODEL_PATH = "model/Annisa Humaira_Laporan 4.pt"  # Face Detection (Real/Sketch/Synthetic)
 KERAS_MODEL_PATH = "model/Annisa Humaira_Laporan 2.h5"  # Car vs Truck
-IMG_SIZE = (128, 128)  # classifier input
+IMG_SIZE = (128, 128)  # untuk classifier
+CLASS_NAMES = ["Not a Car", "A Car"]  # info awal dari kode kamu (tidak dipakai di logika final)
 
 # =========================
-# BACKGROUND & THEME CSS
+# BACKGROUND (ambil bg.jpeg atau bg.jpg jika ada)
 # =========================
 def get_base64_image(image_path: str) -> str:
     p = Path(image_path)
@@ -51,67 +47,35 @@ def get_base64_image(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 bg_img = ""
-for cand in ["bg.jpg"]:
+for cand in ["bg.jpeg", "bg.jpg"]:
     bg_img = get_base64_image(cand)
     if bg_img:
         break
 
-st.markdown(
-    f"""
-    <style>
-    .stApp {{
-        {"background-image: url('data:image/jpeg;base64," + bg_img + "');" if bg_img else ""}
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
-    }}
-    .hero {{
-        background: rgba(0,0,0,0.55);
-        border-radius: 24px;
-        padding: 32px;
-        color: #f7f7f7;
-        box-shadow: 0 10px 30px rgba(0,0,0,.25);
-    }}
-    .hero h1 {{
-        font-size: 44px; margin: 0 0 8px 0; font-weight: 800;
-    }}
-    .hero p {{
-        font-size: 16px; opacity: .95; margin: 0;
-    }}
-    .card {{
-        background: rgba(255,255,255,.92);
-        border-radius: 20px;
-        padding: 20px;
-        box-shadow: 0 8px 24px rgba(0,0,0,.12);
-        transition: transform .2s ease, box-shadow .2s ease;
-        height: 100%;
-    }}
-    .card:hover {{
-        transform: translateY(-2px);
-        box-shadow: 0 10px 28px rgba(0,0,0,.18);
-    }}
-    .card h3 {{ margin-top: 0; }}
-    .pill {{
-        display:inline-block; padding:6px 12px; border-radius:999px;
-        background:#EDF2FF; color:#4C6EF5; font-weight:600; font-size:12px;
-        margin-bottom:10px;
-    }}
-    .btn-primary {{
-        background:#4C6EF5; color:white; padding:10px 16px; border-radius:12px;
-        text-decoration:none; font-weight:700; display:inline-block; border:0;
-    }}
-    .btn-ghost {{
-        background:transparent; color:#4C6EF5; padding:10px 16px; border-radius:12px;
-        border:1.5px solid #4C6EF5; text-decoration:none; font-weight:700; display:inline-block;
-    }}
-    .muted {{ color:#6b7280; font-size:14px; }}
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+if bg_img:
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image: url("data:image/jpeg;base64,{bg_img}");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }}
+        .title {{
+            text-align: center;
+            font-size: 44px;
+            font-weight: 800;
+            color: #f0f0f0;
+            text-shadow: 0 2px 6px rgba(0,0,0,.35);
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
 # =========================
-# HELPERS: Detection (YOLO)
+# HELPERS (Deteksi/YOLO)
 # =========================
 @st.cache_resource(show_spinner=False)
 def load_yolo_model(path: str):
@@ -123,6 +87,7 @@ def load_yolo_model(path: str):
     return YOLO(path)
 
 def get_class_names(model) -> dict:
+    """Map nama asli model ke label Real/Sketch/Synthetic"""
     raw = model.names if hasattr(model, "names") else {}
     mapped = {}
     for cid, name in raw.items():
@@ -138,6 +103,7 @@ def get_class_names(model) -> dict:
     return mapped
 
 def draw_and_get_image(result):
+    """Convert hasil YOLO (BGR) ke PIL RGB"""
     bgr = result.plot()
     rgb = bgr[:, :, ::-1]
     return Image.fromarray(rgb)
@@ -147,10 +113,13 @@ def summarize_counts(result, names: dict):
         return []
     cls_ids = result.boxes.cls.cpu().numpy().astype(int)
     confs = result.boxes.conf.cpu().numpy()
-    return [(names.get(cid, str(cid)), float(conf)) for cid, conf in zip(cls_ids, confs)]
+    dets = []
+    for cid, conf in zip(cls_ids, confs):
+        dets.append((names.get(cid, str(cid)), float(conf)))
+    return dets
 
 # =========================
-# HELPERS: Classification (Keras)
+# HELPERS (Klasifikasi/Keras)
 # =========================
 @st.cache_resource
 def load_keras_model():
@@ -170,79 +139,52 @@ def predict_car_truck(img: Image.Image, model):
     x = preprocess_image(img, size=IMG_SIZE)
     preds = model.predict(x, verbose=0)
     p_car = float(preds.ravel()[0])
+
+    # Logika dari kode kamu:
+    # jika p_car >= 0.5 -> Car, else -> Truck (confidence disesuaikan)
     if p_car >= 0.5:
-        label, conf = "Car", p_car
+        label = "Car"
+        conf = p_car
     else:
-        label, conf = "Truck", 1.0 - p_car
+        label = "Truck"
+        conf = 1.0 - p_car
+
     return label, conf, p_car
 
 # =========================
-# ROUTING (Home / Detect / Classify)
+# SIDEBAR
 # =========================
-def go(page_name: str):
-    st.session_state.page = page_name
-    # reset output saat berpindah halaman
-    if page_name != "detect":
-        st.session_state.det_output = None
-    if page_name != "classify":
-        st.session_state.prediction = None
+st.sidebar.header("⚙️ Mode")
+mode = st.sidebar.radio(
+    "Pilih fitur:",
+    ["Face Detection (YOLOv8) — Real/Sketch/Synthetic", "Car vs Truck Classification (Keras)"],
+    index=0
+)
 
-# ========== HOME ==========
-def page_home():
-    st.markdown(
-        """
-        <div class="hero">
-            <h1>Dashboard ...</h1>
-            <p>Dashboard untuk <b>Deteksi Objek</b> dan <b>Klasifikasi Gambar</b>.
-               Aplikasi ini dirancang ringan, cepat, dan mudah dipakai. Pilih mode yang kamu butuhkan </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    st.write("")
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(
-            """
-            <div class="card">
-                <h3>Face Detection</h3>
-                <p class="muted">Untuk mendeteksi wajah (real, sketch, synthetic) dengan hasil anotasi siap unduh.</p>
-                """,
-            unsafe_allow_html=True
-        )
-        if st.button("→ Mulai Deteksi Objek", use_container_width=True):
-            go("detect")
-        st.markdown("</div>", unsafe_allow_html=True)
+st.sidebar.markdown("---")
+st.sidebar.caption("Unggah gambar di panel utama sesuai mode yang dipilih.")
 
-    with c2:
-        st.markdown(
-            """
-            <div class="card">
-                <h3>Car vs Truck Classification</h3>
-                <p class="muted">Untuk mengklasifikasi gambar kendaraan menjadi
-                <i>Car</i> atau <i>Truck</i>.</p>
-            """,
-            unsafe_allow_html=True
-        )
-        if st.button("→ Mulai Klasifikasi Gambar", use_container_width=True):
-            go("classify")
-        st.markdown("</div>", unsafe_allow_html=True)
+# =========================
+# MODE 1: Face Detection (YOLO)
+# =========================
+if mode.startswith("Face Detection"):
+    st.markdown('<div class="title">Face Detection: Real / Sketch / Synthetic</div>', unsafe_allow_html=True)
+    uploaded = st.file_uploader("Upload an image (JPG/PNG)", type=["jpg", "jpeg", "png"], key="up_det")
 
-    st.write("")
-
-# ========== DETECTION ==========
-def page_detect():
-    st.markdown("### 🔎 Face Detection — Real / Sketch / Synthetic")
-
-    uploaded = st.file_uploader("Upload gambar (JPG/PNG)", type=["jpg", "jpeg", "png"], key="up_det")
-    if st.button("← Kembali ke Dashboard", type="secondary"):
-        go("home")
+    # Param deteksi
+    with st.expander("🔧 Pengaturan Deteksi"):
+        conf_det = st.slider("Confidence", 0.1, 0.95, 0.5, 0.05)
+        iou_det = st.slider("NMS IoU", 0.1, 0.95, 0.5, 0.05)
+        imgsz_det = st.select_slider("Image size (inference)", options=[320, 416, 480, 512, 640, 800, 960], value=640)
+        show_btn = st.checkbox("Tampilkan tombol Download hasil anotasi", value=True)
 
     if uploaded:
         img = Image.open(uploaded).convert("RGB")
         col1, col2 = st.columns([1.25, 1.0], gap="large")
+
         with col1:
             st.image(img, caption="Uploaded Image", use_container_width=True)
+
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("Run Detection", use_container_width=True):
@@ -253,46 +195,59 @@ def page_detect():
                         with st.spinner("Detecting faces..."):
                             model = load_yolo_model(YOLO_MODEL_PATH)
                             names = get_class_names(model)
-                            results = model(img, conf=st.session_state.conf_det, iou=st.session_state.iou_det,
-                                            imgsz=st.session_state.imgsz_det, verbose=False)
+                            results = model(img, conf=conf_det, iou=iou_det, imgsz=imgsz_det, verbose=False)
                             result = results[0]
                             annotated = draw_and_get_image(result)
                             detections = summarize_counts(result, names)
-                        st.session_state.det_output = {"annotated": annotated, "detections": detections}
+                        st.session_state["det_output"] = {"annotated": annotated, "detections": detections}
                     except Exception as e:
                         st.error(f"Gagal menjalankan detection: {e}")
 
-    out = st.session_state.det_output
+    # Hasil Deteksi
+    out = st.session_state.get("det_output")
     if out:
         colA, colB = st.columns([1.25, 1.0], gap="large")
         with colA:
             st.image(out["annotated"], caption="Detections", use_container_width=True)
-            if st.session_state.show_dl:
+
+            if show_btn:
                 buf = io.BytesIO()
                 out["annotated"].save(buf, format="PNG")
                 filename = f"faces_result_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                st.download_button("⬇️ Download annotated image", buf.getvalue(), file_name=filename, mime="image/png", use_container_width=True)
+                st.download_button(
+                    label="⬇️ Download annotated image",
+                    data=buf.getvalue(),
+                    file_name=filename,
+                    mime="image/png",
+                    use_container_width=True
+                )
+
         with colB:
-            st.markdown("#### Detection Result")
+            st.markdown("## Detection Result")
             if out["detections"]:
                 for label, conf in out["detections"]:
                     st.markdown(f"- **{label}** — Confidence: `{conf:.2f}`")
             else:
                 st.info("No faces detected.")
 
-# ========== CLASSIFICATION ==========
-def page_classify():
-    st.markdown("### 🏷️ Car vs Truck Classification")
+# =========================
+# MODE 2: Car vs Truck Classification (Keras)
+# =========================
+else:
+    st.markdown('<div class="title">Car or Truck Classification</div>', unsafe_allow_html=True)
+    uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"], key="up_cls")
 
-    uploaded = st.file_uploader("Upload gambar (JPG/PNG)", type=["jpg", "jpeg", "png"], key="up_cls")
-    if st.button("← Kembali ke Dashboard", type="secondary"):
-        go("home")
+    with st.expander("🔧 Pengaturan Klasifikasi"):
+        st.caption("Arsitektur mengikuti kode asli: resize ke 128×128 dan dinormalisasi 1/255.")
+        st.write(f"Model path: `{KERAS_MODEL_PATH}`")
 
-    if uploaded:
-        img = Image.open(uploaded)
+    if uploaded_file:
+        img = Image.open(uploaded_file)
+
         col1, col2, col3 = st.columns([1.2, 0.8, 1.2], gap="large")
         with col1:
             st.image(img, use_container_width=True, caption="Uploaded Image")
+
         with col2:
             st.markdown("<br><br>", unsafe_allow_html=True)
             if st.button("Run Classification", use_container_width=True):
@@ -303,31 +258,38 @@ def page_classify():
                         with st.spinner("Classifying..."):
                             model = load_keras_model()
                             label, conf, raw_car = predict_car_truck(img, model)
-                        st.session_state.prediction = {"label": label, "conf": conf, "raw_car": raw_car}
+                        st.session_state["prediction"] = {
+                            "label": label,
+                            "conf": conf,
+                            "raw_car": raw_car,
+                        }
                     except Exception as e:
                         st.error(f"Gagal menjalankan klasifikasi: {e}")
+
         with col3:
-            pred = st.session_state.prediction
+            pred = st.session_state.get("prediction")
             if pred:
                 st.markdown(
                     f"""
                     <br><br>
-                    <div class="card">
-                      <h3>Prediction: <code>{pred['label']}</code></h3>
-                      <h4>Confidence: <code>{pred['conf']:.2f}</code></h4>
-                      <p class="muted">(Raw probability for <b>Car</b> = {pred['raw_car']:.2f})</p>
-                    </div>
+                    <h3>Prediction: <code>{pred['label']}</code></h3>
+                    <h4>Confidence: <code>{pred['conf']:.2f}</code></h4>
+                    <p style="font-size:14px;color:gray;">
+                        (Model raw Car probability = {pred['raw_car']:.2f})
+                    </p>
                     """,
-                    unsafe_allow_html=True
+                    unsafe_allow_html=True,
                 )
 
 # =========================
-# RENDER
+# FOOTNOTE
 # =========================
-st.empty()  # anchor
-if st.session_state.page == "home":
-    page_home()
-elif st.session_state.page == "detect":
-    page_detect()
-else:
-    page_classify()
+with st.expander("ℹ️ Tips & Catatan"):
+    st.markdown(
+        """
+- **YOLOv8 (.pt)**: pastikan versi `ultralytics` match dengan saat training model.
+- **Keras (.h5)**: app memetakan probabilitas output tunggal ke `Car` jika ≥ 0.5, selain itu `Truck`.
+- Background akan memakai `bg.jpeg` jika ada; jika tidak ada akan coba `bg.jpg`.
+- Jika ada error modul, jalankan `pip install` seperti baris petunjuk di atas.
+        """
+    )
