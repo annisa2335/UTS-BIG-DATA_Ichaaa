@@ -1,7 +1,4 @@
-# app_ui_minimal.py (dengan Registrasi & Login sebelum Dashboard)
-# =========================================================
-# Streamlit App:
-# Auth (Login/Daftar) → Dashboard (Detect / Classify / About / Help)
+# app_ui_minimal.py (dengan Registrasi, Login & fix st.rerun)
 # =========================================================
 import io
 import os
@@ -16,7 +13,7 @@ import numpy as np
 from PIL import Image
 import streamlit as st
 
-# ------------------ Optional imports with safe fallback ------------------
+# -------- Optional imports --------
 _HAS_ULTRA = True
 try:
     from ultralytics import YOLO
@@ -52,8 +49,8 @@ AUTHOR_NAME = "Annisa Humaira"
 AUTHOR_NPM  = "2208108010070"
 LOGO_PATH   = "LOGO-USK-MASTER.png"
 
-YOLO_MODEL_PATH   = "model/Annisa Humaira_Laporan 4.pt"   # Face Detection (Real/Sketch/Synthetic)
-KERAS_MODEL_PATH  = "model/Annisa Humaira_Laporan 2.h5"    # Car vs Truck
+YOLO_MODEL_PATH   = "model/Annisa Humaira_Laporan 4.pt"
+KERAS_MODEL_PATH  = "model/Annisa Humaira_Laporan 2.h5"
 IMG_SIZE          = (128, 128)
 
 # --- UI sizes (px) ---
@@ -83,12 +80,11 @@ def _write_users(users: list):
     USERS_FILE.write_text(json.dumps(users, indent=2), encoding="utf-8")
 
 def _hash_password(password: str, salt: bytes) -> str:
-    # sha256(salt + password)
     h = hashlib.sha256()
     h.update(salt + password.encode("utf-8"))
     return h.hexdigest()
 
-def register_user(name: str, npm: str, email: str, password: str) -> tuple[bool, str]:
+def register_user(name: str, npm: str, email: str, password: str):
     users = _read_users()
     email_norm = email.strip().lower()
     if any(u["email"] == email_norm for u in users):
@@ -109,7 +105,7 @@ def register_user(name: str, npm: str, email: str, password: str) -> tuple[bool,
     _write_users(users)
     return True, "Registrasi berhasil. Silakan login."
 
-def login_user(email: str, password: str) -> tuple[bool, str | dict]:
+def login_user(email: str, password: str):
     users = _read_users()
     email_norm = email.strip().lower()
     user = next((u for u in users if u["email"] == email_norm), None)
@@ -121,7 +117,6 @@ def login_user(email: str, password: str) -> tuple[bool, str | dict]:
         return False, "Data akun rusak."
     if _hash_password(password, salt) != user["password_hash"]:
         return False, "Password salah."
-    # return minimal profile to session
     profile = {"name": user["name"], "npm": user["npm"], "email": user["email"]}
     return True, profile
 
@@ -142,8 +137,6 @@ for cand in ["bg.jpg", "bg.jpeg"]:
         break
 
 PRIMARY = "#7C3AED"
-PRIMARY_DARK = "#5B21B6"
-ACCENT = "#10B981"
 TEXT_MUTED = "#6B7280"
 
 st.markdown(
@@ -151,58 +144,24 @@ st.markdown(
     <style>
     .stApp {{
         {"background-image: url('data:image/jpeg;base64," + bg_img + "');" if bg_img else ""}
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
-    }}
-    .glass {{
-        background: rgba(255,255,255,0.85);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        border-radius: 20px;
-        box-shadow: 0 10px 30px rgba(0,0,0,.12);
-        padding: 16px 22px;
+        background-size: cover; background-position: center; background-repeat: no-repeat;
     }}
     .hero {{
         background: linear-gradient(135deg, rgba(124,58,237,.85), rgba(16,185,129,.85));
-        border-radius: 24px;
-        padding: 36px;
-        color: #fff;
+        border-radius: 24px; padding: 36px; color: #fff;
         box-shadow: 0 18px 40px rgba(0,0,0,.25);
     }}
-    .hero h1 {{ margin: 0 0 8px 0; font-size: 46px; font-weight: 800; }}
-    .hero p  {{ margin: 0; font-size: 16px; opacity: .98; }}
-    .card {{
-        background: rgba(255,255,255,.96);
-        border-radius: 18px;
-        padding: 20px;
-        box-shadow: 0 10px 26px rgba(0,0,0,.12);
-        transition: transform .15s ease, box-shadow .15s ease;
-        height: 100%;
-    }}
-    .muted {{ color:{TEXT_MUTED}; font-size:14px; }}
-    .footer {{ color:{TEXT_MUTED}; font-size:12px; text-align:center; margin-top:36px; }}
+    .card {{ background: rgba(255,255,255,.96); border-radius: 18px; padding: 20px;
+             box-shadow: 0 10px 26px rgba(0,0,0,.12); }}
     .topbar {{
-        background: rgba(255,255,255,.95);
-        border-radius: 14px;
-        padding: 10px 16px;
-        box-shadow: 0 8px 22px rgba(0,0,0,.10);
-        margin-bottom: 8px;
+        background: rgba(255,255,255,.95); border-radius: 14px; padding: 10px 16px;
+        box-shadow: 0 8px 22px rgba(0,0,0,.10); margin-bottom: 8px;
         display:flex; align-items:center; gap:12px;
     }}
     .topbar .title {{ font-weight: 800; font-size: 18px; line-height:1.2; }}
     .topbar .sub   {{ color:{TEXT_MUTED}; font-size: 12px; }}
-    .chip {{
-        display:inline-block; padding:4px 10px; border-radius:999px;
-        background:#EEF2FF; color:#4C51BF; font-weight:700; font-size:12px;
-    }}
-    .result-label {{
-        font-weight: 900;
-        font-size: 36px;
-        margin: 8px 0 6px 0;
-        letter-spacing: .5px;
-        color: #111827;
-    }}
+    .result-label {{ font-weight: 900; font-size: 36px; margin: 8px 0 6px 0; letter-spacing: .5px; color: #111827; }}
+    .footer {{ color:{TEXT_MUTED}; font-size:12px; text-align:center; margin-top:36px; }}
     </style>
     """,
     unsafe_allow_html=True
@@ -256,7 +215,7 @@ def load_keras_model():
         raise RuntimeError(f"TensorFlow/Keras belum tersedia: {_TF_ERR}")
     p = Path(KERAS_MODEL_PATH)
     if not p.exists():
-        raise FileNotFoundError(f"Model Keras tidak ditemukan: {KERAS_MODEL_PATH}")
+        raise RuntimeError(f"Model Keras tidak ditemukan: {KERAS_MODEL_PATH}")
     return tf.keras.models.load_model(KERAS_MODEL_PATH)
 
 def preprocess_image(img: Image.Image, size=(128, 128)):
@@ -275,7 +234,20 @@ def predict_car_truck(img: Image.Image, model):
     return label, conf, p_car
 
 # =========================
-# TOP BAR (show only when logged-in)
+# UTIL: Rerun kompatibel versi
+# =========================
+def do_rerun():
+    """Panggil st.rerun() dengan fallback ke st.experimental_rerun() untuk Streamlit lama."""
+    try:
+        st.rerun()
+    except Exception:
+        try:
+            st.experimental_rerun()  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+# =========================
+# TOP BAR (hanya saat login)
 # =========================
 def topbar():
     logo_b64 = get_base64_image(LOGO_PATH)
@@ -292,9 +264,8 @@ def topbar():
             unsafe_allow_html=True
         )
     with cols[2]:
-        right = "<div class='title'>{}</div><div class='sub'>NPM: {}</div>".format(AUTHOR_NAME, AUTHOR_NPM)
+        right = f"<div class='title'>{AUTHOR_NAME}</div><div class='sub'>NPM: {AUTHOR_NPM}</div>"
         if st.session_state.auth_user:
-            # show logged-in email
             u = st.session_state.auth_user
             right += f"<div class='sub'>Login sebagai: {u['name']} ({u['email']})</div>"
         st.markdown(f"<div class='topbar' style='justify-content:flex-end;'><div style='text-align:right'>{right}</div></div>", unsafe_allow_html=True)
@@ -303,9 +274,10 @@ def topbar():
                 st.session_state.auth_user = None
                 st.session_state.page = "home"
                 st.success("Anda telah logout.")
+                do_rerun()
 
 # =========================
-# NAVBAR (show only when logged-in)
+# NAVBAR (hanya saat login)
 # =========================
 def navbar():
     tabs = ["🏠 Home", "🧭 Detect", "🏷️ Classify", "ℹ️ About", "❓ Help"]
@@ -316,7 +288,7 @@ def navbar():
     st.session_state.page = mapping[choice]
 
 # =========================
-# AUTH PAGES
+# AUTH PAGE
 # =========================
 def page_auth():
     st.markdown(
@@ -342,7 +314,8 @@ def page_auth():
             if ok:
                 st.session_state.auth_user = data  # {name,npm,email}
                 st.success(f"Login berhasil. Selamat datang, {data['name']}!")
-                st.experimental_rerun()
+                # 🔧 FIX: gunakan st.rerun() (fallback ke experimental bila ada)
+                do_rerun()
             else:
                 st.error(data)
 
@@ -374,12 +347,12 @@ def page_auth():
                     st.error(msg)
 
     st.markdown(
-        "<p class='muted' style='text-align:center;margin-top:24px;'>Data akun disimpan lokal pada <code>users.json</code> dengan hash + salt (tanpa plaintext password).</p>",
+        "<p class='muted' style='text-align:center;margin-top:24px;'>Akun disimpan lokal pada <code>users.json</code> menggunakan hash + salt (tanpa plaintext password).</p>",
         unsafe_allow_html=True
     )
 
 # =========================
-# APP PAGES (dashboard)
+# DASHBOARD PAGES
 # =========================
 def page_home():
     st.markdown(
@@ -499,11 +472,9 @@ def page_help():
 # =========================
 # RENDER
 # =========================
-# Jika belum login → tampilkan halaman Auth saja
 if not st.session_state.auth_user:
     page_auth()
 else:
-    # Sudah login → tampilkan topbar + navbar + halaman dashboard
     topbar()
     navbar()
 
