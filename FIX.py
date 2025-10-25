@@ -1,4 +1,4 @@
-# app_ui_minimal.py (versi final: hasil klasifikasi langsung tampil)
+# app_ui_minimal.py (dengan Nama, NPM, dan Logo USK)
 # =========================================================
 # Streamlit App (UI minimal, no Settings panel)
 # Upload → Preview (ukuran sedang) → Jalankan Deteksi/Klasifikasi
@@ -33,7 +33,7 @@ except Exception as e:
 # =========================
 st.set_page_config(page_title="Dashboard_Annisa", layout="wide", page_icon="🪄")
 if "page" not in st.session_state:
-    st.session_state.page = "home"
+    st.session_state.page = "home"  # home | detect | classify | about | help
 if "det_output" not in st.session_state:
     st.session_state.det_output = None
 if "prediction" not in st.session_state:
@@ -44,17 +44,17 @@ if "prediction" not in st.session_state:
 # =========================
 AUTHOR_NAME = "Annisa Humaira"
 AUTHOR_NPM  = "2208108010070"
-LOGO_PATH   = "LOGO-USK-MASTER.png"
+LOGO_PATH   = "LOGO-USK-MASTER.png"   # ← simpan file logo USK sebagai logo_usk.png di folder yang sama
 
-YOLO_MODEL_PATH = "model/Annisa Humaira_Laporan 4.pt"
-KERAS_MODEL_PATH = "model/Annisa Humaira_Laporan 2.h5"
-IMG_SIZE = (128, 128)
+YOLO_MODEL_PATH = "model/Annisa Humaira_Laporan 4.pt"   # Face Detection (Real/Sketch/Synthetic)
+KERAS_MODEL_PATH = "model/Annisa Humaira_Laporan 2.h5"  # Car vs Truck
+IMG_SIZE = (128, 128)                                   # classifier input
 
 # --- UI sizes (px) ---
-PREVIEW_WIDTH = 480
-OUTPUT_WIDTH  = 640
+PREVIEW_WIDTH = 480   # ukuran tampilan pratinjau gambar
+OUTPUT_WIDTH  = 640   # ukuran tampilan hasil anotasi/deteksi
 
-# Default parameter
+# Default parameter (tanpa panel pengaturan)
 YOLO_DEFAULT_CONF = 0.5
 YOLO_DEFAULT_IOU  = 0.5
 YOLO_INFER_SIZE   = 640
@@ -76,9 +76,9 @@ for cand in ["bg.jpg", "bg.jpeg"]:
     if bg_img:
         break
 
-PRIMARY = "#7C3AED"
+PRIMARY = "#7C3AED"     # ungu-vivid
 PRIMARY_DARK = "#5B21B6"
-ACCENT = "#10B981"
+ACCENT = "#10B981"      # hijau mint
 TEXT_MUTED = "#6B7280"
 
 st.markdown(
@@ -117,6 +117,7 @@ st.markdown(
     }}
     .muted {{ color:{TEXT_MUTED}; font-size:14px; }}
     .footer {{ color:{TEXT_MUTED}; font-size:12px; text-align:center; margin-top:36px; }}
+    /* Topbar */
     .topbar {{
         background: rgba(255,255,255,.95);
         border-radius: 14px;
@@ -131,28 +132,13 @@ st.markdown(
     .topbar .sub {{
         color:{TEXT_MUTED}; font-size: 12px;
     }}
-    /* hasil klasifikasi */
-    .result-label {{
-        font-weight: 900;
-        font-size: 36px;
-        text-align: center;
-        margin: 8px 0 4px 0;
-        letter-spacing: .5px;
-        color: #111827;
-    }}
-    .result-subtle {{
-        text-align: center;
-        color: #6B7280;
-        font-size: 12px;
-        margin-bottom: 8px;
-    }}
     </style>
     """,
     unsafe_allow_html=True
 )
 
 # =========================
-# HELPERS YOLO
+# HELPERS: Detection (YOLO)
 # =========================
 @st.cache_resource(show_spinner=False)
 def load_yolo_model(path: str):
@@ -191,7 +177,7 @@ def summarize_counts(result, names: dict):
     return [(names.get(cid, str(cid)), float(conf)) for cid, conf in zip(cls_ids, confs)]
 
 # =========================
-# HELPERS CLASSIFIER
+# HELPERS: Classification (Keras)
 # =========================
 @st.cache_resource
 def load_keras_model():
@@ -218,25 +204,41 @@ def predict_car_truck(img: Image.Image, model):
     return label, conf, p_car
 
 # =========================
-# TOP BAR
+# TOP BAR (Logo + Nama + NPM)
 # =========================
 def topbar():
     logo_b64 = get_base64_image(LOGO_PATH)
-    cols = st.columns([0.1, 0.65, 0.25])
-    with cols[0]:
+    left, mid, right = st.columns([0.08, 0.62, 0.30])
+    with left:
         if logo_b64:
             st.markdown(
                 f"<div class='topbar' style='justify-content:center;'><img src='data:image/png;base64,{logo_b64}' height='48' /></div>",
                 unsafe_allow_html=True
             )
-    with cols[1]:
+        else:
+            st.markdown("<div class='topbar' style='justify-content:center;'>🏫</div>", unsafe_allow_html=True)
+    with mid:
         st.markdown(
-            "<div class='topbar'><div><div class='title'>Universitas Syiah Kuala</div><div class='sub'>Fakultas MIPA — Statistika</div></div></div>",
+            f"""
+            <div class='topbar'>
+              <div>
+                <div class='title'>Universitas Syiah Kuala</div>
+                <div class='sub'>Fakultas Teknik — Informatika</div>
+              </div>
+            </div>
+            """,
             unsafe_allow_html=True
         )
-    with cols[2]:
+    with right:
         st.markdown(
-            f"<div class='topbar' style='justify-content:flex-end;'><div style='text-align:right'><div class='title'>{AUTHOR_NAME}</div><div class='sub'>NPM: {AUTHOR_NPM}</div></div></div>",
+            f"""
+            <div class='topbar' style='justify-content:flex-end;'>
+              <div style='text-align:right'>
+                <div class='title'>{AUTHOR_NAME}</div>
+                <div class='sub'>NPM: {AUTHOR_NPM}</div>
+              </div>
+            </div>
+            """,
             unsafe_allow_html=True
         )
 
@@ -340,31 +342,24 @@ def page_classify():
 
     pred = st.session_state.prediction
     if pred:
-        # tampilkan gambar
-        st.image(img_preview, width=OUTPUT_WIDTH, use_container_width=False)
-
-        # tampilkan hasil singkat
-        st.markdown(f"<div class='result-label'>{pred['label']}</div>", unsafe_allow_html=True)
-
-        # detail tambahan dalam expander
-        with st.expander("Detail"):
-            st.markdown(f"- **Confidence:** `{pred['conf']:.2f}`")
-            st.markdown(f"- **Raw prob (Car):** `{pred['raw_car']:.2f}`")
-            st.caption(f"Latency: {pred['elapsed']:.2f}s")
+        st.image(img_preview, caption=f"Predicted: {pred['label']} ({pred['conf']:.2f})", width=OUTPUT_WIDTH, use_container_width=False)
+        st.markdown(f"**Confidence:** {pred['conf']:.2f}")
+        st.markdown(f"**Raw prob (Car):** {pred['raw_car']:.2f}")
+        st.caption(f"Latency: {pred['elapsed']:.2f}s")
 
 def page_about():
     st.markdown("### ℹ️ Tentang Aplikasi")
     st.info("Aplikasi sederhana untuk deteksi wajah (YOLOv8) dan klasifikasi kendaraan (Keras).")
-    st.markdown(f"**Disusun oleh:** {AUTHOR_NAME}  \n**NPM:** {AUTHOR_NPM}  \n**Universitas Syiah Kuala**")
+    st.markdown(f"**Disusun oleh:** {AUTHOR_NAME}  \n**NPM:** {AUTHOR_NPM}  \n**Institusi:** Universitas Syiah Kuala")
 
 def page_help():
     st.markdown("### ❓ Panduan Penggunaan")
-    st.markdown("1️⃣ Masuk ke halaman **Detect** atau **Classify**.\n\n2️⃣ Upload gambar (JPG/PNG).\n\n3️⃣ Klik tombol proses.\n\n4️⃣ Lihat hasil & confidence di bawah gambar.")
+    st.markdown("1️⃣ Masuk ke halaman **Detect** atau **Classify**.\n\n2️⃣ Upload gambar (JPG/PNG).\n\n3️⃣ Klik tombol proses.\n\n4️⃣ Lihat hasil & confidence.")
 
 # =========================
 # RENDER
 # =========================
-topbar()
+topbar()          # ← bar dengan logo USK + nama + NPM
 navbar()
 
 page = st.session_state.page
