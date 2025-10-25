@@ -223,7 +223,7 @@ def topbar():
             <div class='topbar'>
               <div>
                 <div class='title'>Universitas Syiah Kuala</div>
-                <div class='sub'>Fakultas Teknik — Informatika</div>
+                <div class='sub'>Fakultas MIPA — Statistika</div>
               </div>
             </div>
             """,
