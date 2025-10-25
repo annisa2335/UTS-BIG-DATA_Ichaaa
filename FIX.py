@@ -1,8 +1,3 @@
-# app_ui_minimal.py (dengan Nama, NPM, dan Logo USK)
-# =========================================================
-# Streamlit App (UI minimal, no Settings panel)
-# Upload → Preview (ukuran sedang) → Jalankan Deteksi/Klasifikasi
-# =========================================================
 import io
 import time
 import base64
@@ -71,7 +66,7 @@ def get_base64_image(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 bg_img = ""
-for cand in ["bg.jpg", "bg.jpeg"]:
+for cand in ["bg.jpg"]:
     bg_img = get_base64_image(cand)
     if bg_img:
         break
@@ -223,7 +218,7 @@ def topbar():
             <div class='topbar'>
               <div>
                 <div class='title'>Universitas Syiah Kuala</div>
-                <div class='sub'>Fakultas Teknik — Informatika</div>
+                <div class='sub'>Fakultas MIPA — Statistika</div>
               </div>
             </div>
             """,
