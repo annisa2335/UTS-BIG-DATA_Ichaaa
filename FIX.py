@@ -1,3 +1,8 @@
+# app_ui_minimal.py (versi final: hasil klasifikasi langsung tampil)
+# =========================================================
+# Streamlit App (UI minimal, no Settings panel)
+# Upload → Preview (ukuran sedang) → Jalankan Deteksi/Klasifikasi
+# =========================================================
 import io
 import time
 import base64
@@ -120,15 +125,26 @@ st.markdown(
         margin-bottom: 8px;
         display:flex; align-items:center; gap:12px;
     }}
-    .topbar .title {{ font-weight: 800; font-size: 18px; line-height:1.2; }}
-    .topbar .sub   {{ color:{TEXT_MUTED}; font-size: 12px; }}
+    .topbar .title {{
+        font-weight: 800; font-size: 18px; line-height:1.2;
+    }}
+    .topbar .sub {{
+        color:{TEXT_MUTED}; font-size: 12px;
+    }}
     /* hasil klasifikasi */
     .result-label {{
         font-weight: 900;
         font-size: 36px;
-        margin: 8px 0 6px 0;
+        text-align: center;
+        margin: 8px 0 4px 0;
         letter-spacing: .5px;
         color: #111827;
+    }}
+    .result-subtle {{
+        text-align: center;
+        color: #6B7280;
+        font-size: 12px;
+        margin-bottom: 8px;
     }}
     </style>
     """,
@@ -287,28 +303,18 @@ def page_detect():
 
     out = st.session_state.det_output
     if out:
-        # === side-by-side: gambar anotasi (kiri) | ringkasan (kanan)
-        c1, c2 = st.columns([1.2, 0.8], gap="large")
-        with c1:
-            st.image(out["annotated"], caption="🖼️ Detections", width=OUTPUT_WIDTH, use_container_width=False)
-            if SHOW_DOWNLOAD_BTN:
-                buf = io.BytesIO()
-                out["annotated"].save(buf, format="PNG")
-                filename = f"faces_result_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                st.download_button("⬇️ Download annotated image", buf.getvalue(), file_name=filename, mime="image/png")
-        with c2:
-            st.markdown("#### 📊 Ringkasan")
-            count = len(out["detections"]) if out["detections"] else 0
-            mcol = st.columns(3)
-            mcol[0].metric("Detections", count)
-            mcol[1].metric("ImgSize", YOLO_INFER_SIZE)
-            mcol[2].metric("Latency (s)", f"{out['elapsed']:.2f}")
-            st.markdown("#### 🔖 Detail")
-            if out["detections"]:
-                for i, (label, conf) in enumerate(out["detections"], start=1):
-                    st.markdown(f"{i}. **{label}** — `{conf:.2f}`")
-            else:
-                st.info("Tidak ada wajah terdeteksi.")
+        st.image(out["annotated"], caption="🖼️ Detections", width=OUTPUT_WIDTH, use_container_width=False)
+        if SHOW_DOWNLOAD_BTN:
+            buf = io.BytesIO()
+            out["annotated"].save(buf, format="PNG")
+            filename = f"faces_result_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            st.download_button("⬇️ Download annotated image", buf.getvalue(), file_name=filename, mime="image/png")
+        if out["detections"]:
+            st.markdown("#### 📊 Hasil Deteksi")
+            for label, conf in out["detections"]:
+                st.markdown(f"- **{label}** — `{conf:.2f}`")
+        else:
+            st.info("Tidak ada wajah terdeteksi.")
 
 def page_classify():
     st.markdown("### 🏷️ Car vs Truck Classification")
@@ -334,17 +340,17 @@ def page_classify():
 
     pred = st.session_state.prediction
     if pred:
-        # === side-by-side: gambar (kiri) | hasil singkat (kanan)
-        c1, c2 = st.columns([1.2, 0.8], gap="large")
-        with c1:
-            st.image(img_preview, width=OUTPUT_WIDTH, use_container_width=False)
-        with c2:
-            st.markdown("#### Hasil")
-            st.markdown(f"<div class='result-label'>{pred['label']}</div>", unsafe_allow_html=True)
-            with st.expander("Detail"):
-                st.markdown(f"- **Confidence:** `{pred['conf']:.2f}`")
-                st.markdown(f"- **Raw prob (Car):** `{pred['raw_car']:.2f}`")
-                st.caption(f"Latency: {pred['elapsed']:.2f}s")
+        # tampilkan gambar
+        st.image(img_preview, width=OUTPUT_WIDTH, use_container_width=False)
+
+        # tampilkan hasil singkat
+        st.markdown(f"<div class='result-label'>{pred['label']}</div>", unsafe_allow_html=True)
+
+        # detail tambahan dalam expander
+        with st.expander("Detail"):
+            st.markdown(f"- **Confidence:** `{pred['conf']:.2f}`")
+            st.markdown(f"- **Raw prob (Car):** `{pred['raw_car']:.2f}`")
+            st.caption(f"Latency: {pred['elapsed']:.2f}s")
 
 def page_about():
     st.markdown("### ℹ️ Tentang Aplikasi")
@@ -353,35 +359,13 @@ def page_about():
 
 def page_help():
     st.markdown("### ❓ Panduan Penggunaan")
-    st.markdown("1️⃣ Masuk ke halaman **Detect** atau **Classify**.\n\n2️⃣ Upload gambar (JPG/PNG).\n\n3️⃣ Klik tombol proses.\n\n4️⃣ Lihat hasil di panel kanan.")
+    st.markdown("1️⃣ Masuk ke halaman **Detect** atau **Classify**.\n\n2️⃣ Upload gambar (JPG/PNG).\n\n3️⃣ Klik tombol proses.\n\n4️⃣ Lihat hasil & confidence di bawah gambar.")
 
 # =========================
 # RENDER
 # =========================
-def topbar_and_nav():
-    # topbar
-    logo_b64 = get_base64_image(LOGO_PATH)
-    cols = st.columns([0.1, 0.65, 0.25])
-    with cols[0]:
-        if logo_b64:
-            st.markdown(
-                f"<div class='topbar' style='justify-content:center;'><img src='data:image/png;base64,{logo_b64}' height='48' /></div>",
-                unsafe_allow_html=True
-            )
-    with cols[1]:
-        st.markdown(
-            "<div class='topbar'><div><div class='title'>Universitas Syiah Kuala</div><div class='sub'>Fakultas MIPA — Statistika</div></div></div>",
-            unsafe_allow_html=True
-        )
-    with cols[2]:
-        st.markdown(
-            f"<div class='topbar' style='justify-content:flex-end;'><div style='text-align:right'><div class='title'>{AUTHOR_NAME}</div><div class='sub'>NPM: {AUTHOR_NPM}</div></div></div>",
-            unsafe_allow_html=True
-        )
-    # navbar
-    navbar()
-
-topbar_and_nav()
+topbar()
+navbar()
 
 page = st.session_state.page
 if page == "home":
