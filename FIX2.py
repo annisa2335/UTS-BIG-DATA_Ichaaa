@@ -462,7 +462,7 @@ def page_classify():
 
 def page_about():
     st.markdown("### ℹ️ Tentang Aplikasi")
-    st.info("Aplikasi sederhana untuk deteksi wajah (YOLOv8) dan klasifikasi kendaraan (Keras).")
+    st.info("Aplikasi sederhana untuk deteksi wajah dan klasifikasi kendaraan.")
     st.markdown(f"**Disusun oleh:** {AUTHOR_NAME}  \n**NPM:** {AUTHOR_NPM}  \n**Universitas Syiah Kuala**")
 
 def page_help():
