@@ -346,11 +346,6 @@ def page_auth():
                 else:
                     st.error(msg)
 
-    st.markdown(
-        "<p class='muted' style='text-align:center;margin-top:24px;'>Akun disimpan lokal pada <code>users.json</code> menggunakan hash + salt (tanpa plaintext password).</p>",
-        unsafe_allow_html=True
-    )
-
 # =========================
 # DASHBOARD PAGES
 # =========================
