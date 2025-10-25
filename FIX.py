@@ -1,4 +1,4 @@
-# app_ui_minimal.py (versi update dengan ukuran gambar lebih kecil)
+# app_ui_minimal.py (dengan Nama, NPM, dan Logo USK)
 # =========================================================
 # Streamlit App (UI minimal, no Settings panel)
 # Upload → Preview (ukuran sedang) → Jalankan Deteksi/Klasifikasi
@@ -40,8 +40,12 @@ if "prediction" not in st.session_state:
     st.session_state.prediction = None
 
 # =========================
-# MODEL PATH & PARAM
+# IDENTITAS & MODEL PARAM
 # =========================
+AUTHOR_NAME = "Annisa Humaira"
+AUTHOR_NPM  = "2208108010070"
+LOGO_PATH   = "logo_usk.png"   # ← simpan file logo USK sebagai logo_usk.png di folder yang sama
+
 YOLO_MODEL_PATH = "model/Annisa Humaira_Laporan 4.pt"   # Face Detection (Real/Sketch/Synthetic)
 KERAS_MODEL_PATH = "model/Annisa Humaira_Laporan 2.h5"  # Car vs Truck
 IMG_SIZE = (128, 128)                                   # classifier input
@@ -113,6 +117,21 @@ st.markdown(
     }}
     .muted {{ color:{TEXT_MUTED}; font-size:14px; }}
     .footer {{ color:{TEXT_MUTED}; font-size:12px; text-align:center; margin-top:36px; }}
+    /* Topbar */
+    .topbar {{
+        background: rgba(255,255,255,.95);
+        border-radius: 14px;
+        padding: 10px 16px;
+        box-shadow: 0 8px 22px rgba(0,0,0,.10);
+        margin-bottom: 8px;
+        display:flex; align-items:center; gap:12px;
+    }}
+    .topbar .title {{
+        font-weight: 800; font-size: 18px; line-height:1.2;
+    }}
+    .topbar .sub {{
+        color:{TEXT_MUTED}; font-size: 12px;
+    }}
     </style>
     """,
     unsafe_allow_html=True
@@ -183,6 +202,45 @@ def predict_car_truck(img: Image.Image, model):
     else:
         label, conf = "Truck", 1.0 - p_car
     return label, conf, p_car
+
+# =========================
+# TOP BAR (Logo + Nama + NPM)
+# =========================
+def topbar():
+    logo_b64 = get_base64_image(LOGO_PATH)
+    left, mid, right = st.columns([0.08, 0.62, 0.30])
+    with left:
+        if logo_b64:
+            st.markdown(
+                f"<div class='topbar' style='justify-content:center;'><img src='data:image/png;base64,{logo_b64}' height='48' /></div>",
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown("<div class='topbar' style='justify-content:center;'>🏫</div>", unsafe_allow_html=True)
+    with mid:
+        st.markdown(
+            f"""
+            <div class='topbar'>
+              <div>
+                <div class='title'>Universitas Syiah Kuala</div>
+                <div class='sub'>Fakultas Teknik — Informatika</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    with right:
+        st.markdown(
+            f"""
+            <div class='topbar' style='justify-content:flex-end;'>
+              <div style='text-align:right'>
+                <div class='title'>{AUTHOR_NAME}</div>
+                <div class='sub'>NPM: {AUTHOR_NPM}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
 # =========================
 # NAVBAR
@@ -292,6 +350,7 @@ def page_classify():
 def page_about():
     st.markdown("### ℹ️ Tentang Aplikasi")
     st.info("Aplikasi sederhana untuk deteksi wajah (YOLOv8) dan klasifikasi kendaraan (Keras).")
+    st.markdown(f"**Disusun oleh:** {AUTHOR_NAME}  \n**NPM:** {AUTHOR_NPM}  \n**Institusi:** Universitas Syiah Kuala")
 
 def page_help():
     st.markdown("### ❓ Panduan Penggunaan")
@@ -300,6 +359,7 @@ def page_help():
 # =========================
 # RENDER
 # =========================
+topbar()          # ← bar dengan logo USK + nama + NPM
 navbar()
 
 page = st.session_state.page
@@ -314,4 +374,7 @@ elif page == "about":
 else:
     page_help()
 
-st.markdown(f'<div class="footer">© {datetime.datetime.now().year} Dual Vision — built with ❤️ using Streamlit</div>', unsafe_allow_html=True)
+st.markdown(
+    f"<div class='footer'>© {datetime.datetime.now().year} — {AUTHOR_NAME} • NPM {AUTHOR_NPM} • Universitas Syiah Kuala</div>",
+    unsafe_allow_html=True
+)
