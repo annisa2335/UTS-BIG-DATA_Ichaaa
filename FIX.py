@@ -39,7 +39,7 @@ if "prediction" not in st.session_state:
 # =========================
 AUTHOR_NAME = "Annisa Humaira"
 AUTHOR_NPM  = "2208108010070"
-LOGO_PATH   = "logo_usk.png"
+LOGO_PATH   = "LOGO-USK-MASTER.png"
 
 YOLO_MODEL_PATH = "model/Annisa Humaira_Laporan 4.pt"
 KERAS_MODEL_PATH = "model/Annisa Humaira_Laporan 2.h5"
