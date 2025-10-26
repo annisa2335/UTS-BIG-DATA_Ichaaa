@@ -332,6 +332,7 @@ def page_home():
         <div class="hero">
           <h1>Dual Vision Dashboard</h1>
           <p>Deteksi wajah & klasifikasi kendaraan — cepat, ringan, dan mudah.</p>
+          <p>Unggah gambar dan biarkan AI mengenali isinya!</p>
         </div>
         """,
         unsafe_allow_html=True
