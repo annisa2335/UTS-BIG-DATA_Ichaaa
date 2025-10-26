@@ -1,5 +1,3 @@
-# app_ui_minimal.py (dengan Registrasi, Login & fix st.rerun)
-# =========================================================
 import io
 import os
 import json
@@ -28,9 +26,7 @@ except Exception as e:
     _HAS_TF = False
     _TF_ERR = e
 
-# =========================
 # KONFIG & STATE
-# =========================
 st.set_page_config(page_title="Dashboard_Annisa", layout="wide", page_icon="🪄")
 
 if "page" not in st.session_state:
@@ -42,9 +38,7 @@ if "prediction" not in st.session_state:
 if "auth_user" not in st.session_state:
     st.session_state.auth_user = None  # dict: {name, npm, email}
 
-# =========================
 # IDENTITAS & MODEL PARAM
-# =========================
 AUTHOR_NAME = "Annisa Humaira"
 AUTHOR_NPM  = "2208108010070"
 LOGO_PATH   = "LOGO-USK-MASTER.png"
@@ -63,9 +57,8 @@ YOLO_DEFAULT_IOU  = 0.5
 YOLO_INFER_SIZE   = 640
 SHOW_DOWNLOAD_BTN = True
 
-# =========================
+
 # AUTH STORAGE (local JSON)
-# =========================
 USERS_FILE = Path("users.json")
 
 def _read_users():
@@ -120,9 +113,7 @@ def login_user(email: str, password: str):
     profile = {"name": user["name"], "npm": user["npm"], "email": user["email"]}
     return True, profile
 
-# =========================
 # THEME & BACKGROUND
-# =========================
 def get_base64_image(image_path: str) -> str:
     p = Path(image_path)
     if not p.exists():
@@ -167,9 +158,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# =========================
 # HELPERS YOLO
-# =========================
 @st.cache_resource(show_spinner=False)
 def load_yolo_model(path: str):
     if not _HAS_ULTRA:
@@ -206,9 +195,7 @@ def summarize_counts(result, names: dict):
     confs = result.boxes.conf.cpu().numpy()
     return [(names.get(cid, str(cid)), float(conf)) for cid, conf in zip(cls_ids, confs)]
 
-# =========================
 # HELPERS CLASSIFIER
-# =========================
 @st.cache_resource
 def load_keras_model():
     if not _HAS_TF:
@@ -233,9 +220,7 @@ def predict_car_truck(img: Image.Image, model):
         label, conf = "Truck", 1.0 - p_car
     return label, conf, p_car
 
-# =========================
 # UTIL: Rerun kompatibel versi
-# =========================
 def do_rerun():
     """Panggil st.rerun() dengan fallback ke st.experimental_rerun() untuk Streamlit lama."""
     try:
@@ -246,9 +231,7 @@ def do_rerun():
         except Exception:
             pass
 
-# =========================
 # TOP BAR (hanya saat login)
-# =========================
 def topbar():
     logo_b64 = get_base64_image(LOGO_PATH)
     cols = st.columns([0.1, 0.6, 0.3])
@@ -276,9 +259,7 @@ def topbar():
                 st.success("Anda telah logout.")
                 do_rerun()
 
-# =========================
 # NAVBAR (hanya saat login)
-# =========================
 def navbar():
     tabs = ["🏠 Home", "🧭 Detect", "🏷️ Classify", "ℹ️ About", "❓ Help"]
     ids  = ["home", "detect", "classify", "about", "help"]
@@ -287,9 +268,7 @@ def navbar():
     mapping = dict(zip(tabs, ids))
     st.session_state.page = mapping[choice]
 
-# =========================
 # AUTH PAGE
-# =========================
 def page_auth():
     st.markdown(
         """
@@ -346,9 +325,7 @@ def page_auth():
                 else:
                     st.error(msg)
 
-# =========================
 # DASHBOARD PAGES
-# =========================
 def page_home():
     st.markdown(
         """
@@ -464,9 +441,7 @@ def page_help():
     st.markdown("### ❓ Panduan Penggunaan")
     st.markdown("1️⃣ Login/Daftar terlebih dahulu.  \n2️⃣ Masuk ke halaman **Detect** atau **Classify**.  \n3️⃣ Upload gambar (JPG/PNG).  \n4️⃣ Klik tombol proses.  \n5️⃣ Lihat hasil di panel kanan.")
 
-# =========================
 # RENDER
-# =========================
 if not st.session_state.auth_user:
     page_auth()
 else:
