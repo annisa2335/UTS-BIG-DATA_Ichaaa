@@ -330,8 +330,8 @@ def page_home():
     st.markdown(
         """
         <div class="hero">
-          <h1>Dual Vision Dashboard</h1>
-          <p>Deteksi wajah & klasifikasi kendaraan — cepat, ringan, dan mudah.
+          <h1>Detect & Classify Dashboard </h1>
+          <p>Temukan hasil klasifikasi kendaraan dan deteksi wajah secara cepat dan akurat.
           Unggah gambar dan biarkan AI mengenali isinya!</p>
         </div>
         """,
