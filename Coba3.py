@@ -1,8 +1,3 @@
-# app_ui_minimal.py (versi final: hasil klasifikasi langsung tampil)
-# =========================================================
-# Streamlit App (UI minimal, no Settings panel)
-# Upload → Preview (ukuran sedang) → Jalankan Deteksi/Klasifikasi
-# =========================================================
 import io
 import time
 import base64
